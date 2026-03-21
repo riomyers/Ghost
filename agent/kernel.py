@@ -42,19 +42,28 @@ def log(msg, level='INFO'):
 
 
 LAST_NOTIFY = {}
-def notify(title, message):
+# ntfy priority levels: 1=min, 2=low, 3=default, 4=high, 5=urgent
+# Only 'urgent' (5) triggers aggressive phone behavior (vibrate, text forwarding)
+# Use 'urgent' for critical issues only — warnings stay as quiet push notifications
+NTFY_PRIORITIES = {'min': '1', 'low': '2', 'default': '3', 'high': '4', 'urgent': '5'}
+
+def notify(title, message, priority='default'):
     import hashlib
     key = hashlib.md5((title + message[:100]).encode()).hexdigest()
     now = time.time()
     if key in LAST_NOTIFY and now - LAST_NOTIFY[key] < 600:
         return True
     LAST_NOTIFY[key] = now
+    pri = NTFY_PRIORITIES.get(priority, '3')
     try:
         subprocess.run(
-            ['curl', '-s', '-d', message[:500], '-H', f'Title: {title}', NTFY_TOPIC],
+            ['curl', '-s', '-d', message[:500],
+             '-H', f'Title: {title}',
+             '-H', f'Priority: {pri}',
+             NTFY_TOPIC],
             capture_output=True, timeout=15
         )
-        log(f'NOTIFY: {title}')
+        log(f'NOTIFY [{priority}]: {title}')
         return True
     except Exception as e:
         log(f'NOTIFY FAILED: {e}', 'ERROR')
@@ -271,7 +280,8 @@ def run_planner():
                             f'[CONFIRM] Low confidence ({confidence}%): {tool_name}',
                             'send_notification',
                             {'title': f'Ghost: Confirm? ({confidence}% conf)',
-                             'message': f'Goal: {goal["description"][:80]}\nAction: {tool_name}\nParams: {json.dumps(tool_params)[:150]}'}
+                             'message': f'Goal: {goal["description"][:80]}\nAction: {tool_name}\nParams: {json.dumps(tool_params)[:150]}',
+                             'priority': 'default'}
                         )
 
                     database.create_task(
@@ -304,6 +314,7 @@ def execute_tasks():
         if tool == 'send_notification':
             title = params.get('title', 'Ghost')
             message = params.get('message', '')
+            pri = params.get('priority', 'default')
             # Suppress healthy/no-action notifications — only alert on problems
             msg_lower = (title + ' ' + message).lower()
             if any(w in msg_lower for w in ('healthy', 'no action', 'no issues', 'all clear', 'no intervention')):
@@ -312,7 +323,7 @@ def execute_tasks():
                 result = 'Suppressed (healthy status)'
                 database.update_task(task['id'], 'completed', result)
             else:
-                success = notify(title, message)
+                success = notify(title, message, priority=pri)
                 result = 'Sent' if success else 'Failed'
                 database.update_task(task['id'], 'completed' if success else 'failed', result)
 
@@ -324,7 +335,7 @@ def execute_tasks():
             if any(b in cmd.lower() for b in blocked):
                 result = f'BLOCKED: {cmd[:50]}'
                 database.update_task(task['id'], 'failed', result)
-                notify('Ghost: Blocked', f'Refused: {cmd[:80]}')
+                notify('Ghost: Blocked', f'Refused: {cmd[:80]}', priority='high')
             else:
                 r = subprocess.run(['bash', '-c', cmd],
                     capture_output=True, text=True, timeout=30)
@@ -336,7 +347,7 @@ def execute_tasks():
                 aor.reflect_on_action(task['id'], cmd, r.returncode, output)
 
                 if r.returncode != 0:
-                    notify('Ghost: Failed', f'$ {cmd[:60]}\n{output[:200]}')
+                    notify('Ghost: Failed', f'$ {cmd[:60]}\n{output[:200]}', priority='low')
 
         elif tool == 'review_pr':
             repo = params.get('repo', '')
@@ -385,7 +396,7 @@ def execute_tasks():
 
     except subprocess.TimeoutExpired:
         database.update_task(task['id'], 'failed', 'Timed out')
-        notify('Ghost: Timeout', f'Timed out: {params.get("command", "?")[:80]}')
+        notify('Ghost: Timeout', f'Timed out: {params.get("command", "?")[:80]}', priority='low')
     except Exception as e:
         database.update_task(task['id'], 'failed', str(e)[:200])
 
@@ -465,16 +476,22 @@ def self_diagnose():
             DIAG_SUPPRESSED[key] = now + 3600
 
     # Only notify on genuinely new issues — and only ONCE per issue
+    # Critical issues (nexus down, kernel stalled) get urgent priority (triggers texts)
+    # Warnings (high failure rate, cooldowns, token throttle) stay low priority
+    CRITICAL_KEYWORDS = ('nexus failing', 'kernel may be stalled')
     if new_issues:
         report = "SELF-DIAGNOSIS:\n" + "\n".join(f"- {i}" for i in new_issues)
         if remediated:
             report += "\nAUTO-FIX:\n" + "\n".join(f"- {r}" for r in remediated)
-        log(f'DIAG: {len(new_issues)} new issues, {len(remediated)} auto-fixed', 'WARN')
-        database.record_observation('self_diag', report, 'warning')
+        has_critical = any(any(kw in i.lower() for kw in CRITICAL_KEYWORDS) for i in new_issues)
+        severity = 'critical' if has_critical else 'warning'
+        log(f'DIAG: {len(new_issues)} new issues ({severity}), {len(remediated)} auto-fixed', 'WARN')
+        database.record_observation('self_diag', report, severity)
         # Use fixed dedup key so changing numbers don't bypass dedup
         diag_key = 'self-diag-' + '-'.join(sorted(set(i.split(':')[0].strip() for i in new_issues)))
         if diag_key not in LAST_NOTIFY or (time.time() - LAST_NOTIFY.get(diag_key, 0)) > 7200:
-            notify('Ghost: Self-Diagnosis', report[:400])
+            pri = 'urgent' if has_critical else 'low'
+            notify('Ghost: Self-Diagnosis', report[:400], priority=pri)
             LAST_NOTIFY[diag_key] = time.time()
     elif remediated:
         log(f'DIAG: {len(remediated)} auto-fixed, no new issues')
@@ -497,7 +514,8 @@ def startup():
     scores = database.get_all_confidence()
     score_text = ', '.join([f'{s["goal_type"]}={s["confidence"]}%' for s in scores]) if scores else 'none yet'
     notify('Ghost Online',
-           f'Kernel v4. {len(goals)} goals. Smart routing (max {MAX_GOALS_PER_CYCLE}/cycle). Confidence: {score_text}')
+           f'Kernel v4. {len(goals)} goals. Smart routing (max {MAX_GOALS_PER_CYCLE}/cycle). Confidence: {score_text}',
+           priority='low')
 
 
 def main():
@@ -524,7 +542,7 @@ def main():
             time.sleep(CYCLE_INTERVAL)
         except KeyboardInterrupt:
             log('Kernel stopped.')
-            notify('Ghost Offline', 'Kernel stopped.')
+            notify('Ghost Offline', 'Kernel stopped.', priority='high')
             break
         except Exception as e:
             log(f'Kernel error: {e}', 'ERROR')

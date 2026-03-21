@@ -10,16 +10,22 @@ import database
 import nexus_client
 
 NTFY_TOPIC = 'https://ntfy.sh/ghost-pickle-rick'
+NTFY_PRIORITIES = {'min': '1', 'low': '2', 'default': '3', 'high': '4', 'urgent': '5'}
 
 
-def notify(title, message):
+def notify(title, message, priority='default'):
+    pri = NTFY_PRIORITIES.get(priority, '3')
     try:
         subprocess.run(
-            ['curl', '-s', '-d', message[:500], '-H', f'Title: {title}', NTFY_TOPIC],
+            ['curl', '-s', '-d', message[:500],
+             '-H', f'Title: {title}',
+             '-H', f'Priority: {pri}',
+             NTFY_TOPIC],
             capture_output=True, timeout=15
         )
-    except:
-        pass
+    except Exception as e:
+        import sys
+        print(f'scheduler notify failed: {e}', file=sys.stderr)
 
 
 def hourly_health_check():
@@ -36,8 +42,10 @@ def hourly_health_check():
     disk_pct = round((1 - stat.f_bavail / max(stat.f_blocks, 1)) * 100, 1)
 
     if float(load) > 3 or mem_pct > 80 or disk_pct > 80:
+        # Health warnings stay low — only critical outages get texts
         notify('Ghost: Health Warning',
-               f'Load: {load}\nMemory: {mem_pct}%\nDisk: {disk_pct}%')
+               f'Load: {load}\nMemory: {mem_pct}%\nDisk: {disk_pct}%',
+               priority='low')
 
 
 def check_deployed_services():
@@ -50,12 +58,12 @@ def check_deployed_services():
         )
         code = r.stdout.strip()
         if code != '200':
-            notify('Ghost: Dashboard Down', f'ghost.riomyers.com returned {code}')
+            notify('Ghost: Dashboard Down', f'ghost.riomyers.com returned {code}', priority='high')
             subprocess.run(['sudo', 'systemctl', 'restart', 'pickle-dashboard'], timeout=10)
             subprocess.run(['sudo', 'systemctl', 'restart', 'ghost-tunnel'], timeout=10)
-            notify('Ghost: Auto-Recovery', 'Restarted dashboard and tunnel')
+            notify('Ghost: Auto-Recovery', 'Restarted dashboard and tunnel', priority='default')
     except:
-        notify('Ghost: Dashboard Unreachable', 'Could not reach ghost.riomyers.com')
+        notify('Ghost: Dashboard Unreachable', 'Could not reach ghost.riomyers.com', priority='urgent')
 
 
 def weekly_vuln_scan():
@@ -63,9 +71,9 @@ def weekly_vuln_scan():
     try:
         from sensors.vulns import sense
         sense()
-        notify('Ghost: Vuln Scan', 'Weekly vulnerability scan complete. Check dashboard for results.')
+        notify('Ghost: Vuln Scan', 'Weekly vulnerability scan complete. Check dashboard for results.', priority='low')
     except Exception as e:
-        notify('Ghost: Vuln Scan Failed', str(e)[:300])
+        notify('Ghost: Vuln Scan Failed', str(e)[:300], priority='high')
 
 
 def end_of_day_digest():
@@ -117,7 +125,7 @@ Notable actions today:
     except Exception:
         summary = f'Ghost EOD: {thinks} thoughts, {acts} actions, {criticals} critical alerts, {daily_tokens} API calls.'
 
-    notify('Ghost: End of Day', summary[:500])
+    notify('Ghost: End of Day', summary[:500], priority='low')
     database.log_action('act', f'EOD digest sent: {summary[:200]}')
 
 
