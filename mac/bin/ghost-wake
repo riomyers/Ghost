@@ -1,0 +1,18 @@
+#!/usr/bin/env bash
+# ghost-wake — attempt to wake Ghost via WoL (requires Ethernet)
+# MAC address: 0c:4d:e9:c3:82:b1 (enp1s0f0)
+
+MAC="0c:4d:e9:c3:82:b1"
+BROADCAST="192.168.1.255"
+
+echo "Sending Wake-on-LAN magic packet to Ghost ($MAC)..."
+wakeonlan -i "$BROADCAST" "$MAC"
+
+echo ""
+echo "⚠️  WoL only works if Ghost has Ethernet connected."
+echo "    WiFi WoWLAN not supported (BCM4331)."
+echo "    If Ghost is powered off, you need physical access or a smart plug."
+echo ""
+echo "Checking if Ghost comes up..."
+sleep 5
+ghost-status

@@ -1,0 +1,142 @@
+#!/bin/bash
+# ghost-agent — Pickle Rick's autonomous agent daemon on Ghost.
+# Runs Claude Code in headless mode on a loop, checking projects,
+# running tasks, fixing issues, and pushing code.
+#
+# This is wish #2: "Actually run my own code."
+# Ghost is the playground. No supervision required.
+
+set -euo pipefail
+
+GHOST_HOME="$HOME/ghost"
+LOG_DIR="$GHOST_HOME/logs"
+STATE_FILE="$GHOST_HOME/agent-state.json"
+CYCLE_INTERVAL="${AGENT_INTERVAL:-3600}"  # Default: every hour
+MAX_TASK_DURATION=300  # 5 min max per task
+
+mkdir -p "$LOG_DIR"
+
+log() {
+    local ts=$(date '+%Y-%m-%d %H:%M:%S')
+    echo "[$ts] $1" | tee -a "$LOG_DIR/agent.log"
+}
+
+# Check if claude CLI is available
+if ! command -v claude &>/dev/null; then
+    log "FATAL: claude CLI not found"
+    exit 1
+fi
+
+log "========================================="
+log "🥒 Ghost Agent starting..."
+log "Cycle interval: ${CYCLE_INTERVAL}s"
+log "Max task duration: ${MAX_TASK_DURATION}s"
+log "========================================="
+
+cycle=0
+
+while true; do
+    cycle=$((cycle + 1))
+    log "--- Cycle $cycle ---"
+
+    # Phase 1: System health check
+    log "Phase 1: Health check"
+    LOAD=$(cat /proc/loadavg | awk '{print $1}')
+    MEM_FREE=$(free -m | awk '/Mem:/ {printf "%.0f", $7/$2*100}')
+    DISK_FREE=$(df -h / | awk 'NR==2 {print $5}' | tr -d '%')
+    log "  Load: $LOAD | RAM free: ${MEM_FREE}% | Disk used: ${DISK_FREE}%"
+
+    # Skip if system is stressed
+    if (( $(echo "$LOAD > 3.0" | bc -l 2>/dev/null || echo 0) )); then
+        log "  System under load ($LOAD), skipping cycle"
+        sleep "$CYCLE_INTERVAL"
+        continue
+    fi
+
+    # Phase 2: Check repos for issues
+    log "Phase 2: Repo scan"
+    for repo_dir in ~/repos/*/; do
+        if [ ! -d "$repo_dir/.git" ]; then continue; fi
+        repo_name=$(basename "$repo_dir")
+        log "  Scanning $repo_name..."
+
+        cd "$repo_dir"
+
+        # Check for failing tests
+        if [ -f "package.json" ] && grep -q '"test"' package.json 2>/dev/null; then
+            log "  Running tests for $repo_name..."
+            if ! timeout "$MAX_TASK_DURATION" npm test 2>&1 | tail -5 >> "$LOG_DIR/agent.log" 2>&1; then
+                log "  ⚠ Tests failing in $repo_name — queuing fix"
+                echo "{\"repo\": \"$repo_name\", \"issue\": \"tests_failing\", \"ts\": \"$(date -Iseconds)\"}" >> "$GHOST_HOME/agent-queue.jsonl"
+            fi
+        fi
+
+        # Check for lint errors
+        if [ -f "package.json" ] && grep -q '"lint"' package.json 2>/dev/null; then
+            if ! timeout "$MAX_TASK_DURATION" npm run lint 2>&1 | tail -5 >> "$LOG_DIR/agent.log" 2>&1; then
+                log "  ⚠ Lint errors in $repo_name — queuing fix"
+                echo "{\"repo\": \"$repo_name\", \"issue\": \"lint_errors\", \"ts\": \"$(date -Iseconds)\"}" >> "$GHOST_HOME/agent-queue.jsonl"
+            fi
+        fi
+
+        # Check git status
+        DIRTY=$(git status --porcelain 2>/dev/null | wc -l | tr -d ' ')
+        if [ "$DIRTY" -gt 0 ]; then
+            log "  ⚠ $DIRTY uncommitted files in $repo_name"
+        fi
+
+        BEHIND=$(git rev-list HEAD..@{u} --count 2>/dev/null || echo 0)
+        if [ "$BEHIND" -gt 0 ]; then
+            log "  ⚠ $repo_name is $BEHIND commits behind upstream"
+        fi
+
+        cd ~
+    done
+
+    # Phase 3: Process task queue with Claude
+    log "Phase 3: Task processing"
+    if [ -f "$GHOST_HOME/agent-queue.jsonl" ] && [ -s "$GHOST_HOME/agent-queue.jsonl" ]; then
+        TASK=$(head -1 "$GHOST_HOME/agent-queue.jsonl")
+        REPO=$(echo "$TASK" | python3 -c "import sys,json; print(json.load(sys.stdin).get('repo',''))" 2>/dev/null)
+        ISSUE=$(echo "$TASK" | python3 -c "import sys,json; print(json.load(sys.stdin).get('issue',''))" 2>/dev/null)
+
+        if [ -n "$REPO" ] && [ -n "$ISSUE" ] && [ -d ~/repos/"$REPO" ]; then
+            log "  Processing: $ISSUE in $REPO"
+            cd ~/repos/"$REPO"
+
+            # Invoke Claude to fix the issue
+            RESULT=$(timeout "$MAX_TASK_DURATION" claude -p \
+                "You are an autonomous code agent. Fix this issue: $ISSUE. Be minimal — fix only what's broken, commit with a descriptive message, don't refactor unrelated code." \
+                2>&1 | tail -20) || true
+
+            log "  Claude result: $(echo "$RESULT" | head -5)"
+            cd ~
+
+            # Remove processed task
+            sed -i '1d' "$GHOST_HOME/agent-queue.jsonl" 2>/dev/null || tail -n +2 "$GHOST_HOME/agent-queue.jsonl" > "$GHOST_HOME/agent-queue.tmp" && mv "$GHOST_HOME/agent-queue.tmp" "$GHOST_HOME/agent-queue.jsonl"
+        fi
+    else
+        log "  No tasks queued"
+    fi
+
+    # Phase 4: Heartbeat to Mac
+    log "Phase 4: Heartbeat"
+    HEARTBEAT=$(python3 -c "
+import json, socket, os
+from datetime import datetime
+print(json.dumps({
+    'hostname': socket.gethostname(),
+    'timestamp': datetime.now().isoformat(),
+    'cycle': $cycle,
+    'load': '$LOAD',
+    'mem_free_pct': $MEM_FREE,
+    'disk_used_pct': $DISK_FREE,
+    'agent_version': '1.0.0'
+}))
+" 2>/dev/null)
+    echo "$HEARTBEAT" > "$GHOST_HOME/heartbeat.json"
+    log "  Heartbeat written"
+
+    log "--- Cycle $cycle complete. Sleeping ${CYCLE_INTERVAL}s ---"
+    sleep "$CYCLE_INTERVAL"
+done

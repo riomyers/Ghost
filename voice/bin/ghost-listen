@@ -1,0 +1,32 @@
+#!/usr/bin/env python3
+"""ghost-listen — Listen from mic, transcribe with faster-whisper."""
+
+import sys
+import os
+sys.path.insert(0, os.path.expanduser("~/ghost/lib"))
+
+import ear
+
+def main():
+    if len(sys.argv) > 1 and sys.argv[1] == "--file":
+        if len(sys.argv) < 3:
+            print("Usage: ghost-listen --file <audio.wav>", file=sys.stderr)
+            sys.exit(1)
+        text = ear.listen_from_file(sys.argv[2])
+    else:
+        timeout = 30
+        if len(sys.argv) > 1:
+            try:
+                timeout = int(sys.argv[1])
+            except ValueError:
+                pass
+        text = ear.listen(timeout=timeout)
+
+    if text:
+        print(text)
+    else:
+        sys.exit(1)
+
+
+if __name__ == "__main__":
+    main()

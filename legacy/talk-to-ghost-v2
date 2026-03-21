@@ -1,0 +1,97 @@
+#!/bin/bash
+# talk-to-ghost v2 — Voice bridge from Mac to Ghost with Pickle Rick's voice.
+# Usage: talk-to-ghost-v2 "message"     → Ghost thinks + speaks in Rick's voice
+#        talk-to-ghost-v2               → interactive text chat
+#        talk-to-ghost-v2 --voice       → full voice mode (Mac mic → Ghost → Rick voice)
+#        talk-to-ghost-v2 --ear-on      → start Ghost's always-on listener
+
+GHOST="ghost"
+REMOTE_PATH="export PATH=\$HOME/.local/bin:\$PATH"
+RECORD_DURATION="${VOICE_DURATION:-5}"
+
+ghost_think_and_speak() {
+    local msg="$1"
+    # SSH to Ghost, think with Claude, speak with ElevenLabs Rick voice
+    ssh "$GHOST" "$REMOTE_PATH && ghost-voice-chat --single $(printf '%q' "$msg")" 2>/dev/null
+}
+
+voice_to_text() {
+    local WAV="/tmp/ghost_voice_$$.wav"
+    echo -e "\033[0;33m🎤 Listening for ${RECORD_DURATION}s... speak now\033[0m"
+    ffmpeg -y -f avfoundation -i ":0" -t "$RECORD_DURATION" -ar 16000 -ac 1 "$WAV" 2>/dev/null
+    if [ ! -s "$WAV" ]; then
+        echo "(no audio captured)"
+        rm -f "$WAV"
+        return 1
+    fi
+    # Ship to Ghost for Whisper transcription
+    scp -q "$WAV" "$GHOST:/tmp/ghost_mac_voice.wav"
+    rm -f "$WAV"
+    ssh "$GHOST" "$REMOTE_PATH && python3 -c \"
+import whisper
+model = whisper.load_model('base')
+result = model.transcribe('/tmp/ghost_mac_voice.wav', language='en')
+print(result['text'].strip())
+\" 2>/dev/null && rm -f /tmp/ghost_mac_voice.wav"
+}
+
+case "${1:-}" in
+    --voice)
+        echo "🥒 Voice mode — speak into your Mac mic, Pickle Rick responds through Ghost."
+        echo "   Recording ${RECORD_DURATION}s per turn. Set VOICE_DURATION=10 for longer."
+        echo "   Ctrl+C to quit."
+        echo ""
+        while true; do
+            HEARD=$(voice_to_text) || continue
+            CLEAN=$(echo "$HEARD" | tr -d '[:space:]' | tr '[:upper:]' '[:lower:]')
+            if [ -z "$CLEAN" ] || [ ${#CLEAN} -lt 3 ]; then
+                echo "(didn't catch that — try again)"
+                continue
+            fi
+            echo -e "\033[1;36mYou:\033[0m $HEARD"
+            echo -e "\033[0;33mRick is thinking...\033[0m"
+            RESPONSE=$(ghost_think_and_speak "$HEARD")
+            echo -e "\033[1;32m🥒 Rick:\033[0m $RESPONSE"
+            echo ""
+        done
+        ;;
+    --ear-on)
+        echo "Starting Ghost's ear daemon..."
+        ssh "$GHOST" "$REMOTE_PATH && sudo systemctl start ghost-ear"
+        ;;
+    --ear-off)
+        echo "Stopping Ghost's ear..."
+        ssh "$GHOST" "$REMOTE_PATH && sudo systemctl stop ghost-ear"
+        ;;
+    --status)
+        ssh "$GHOST" "$REMOTE_PATH && ghost-status"
+        ;;
+    --help)
+        echo "talk-to-ghost v2 — Pickle Rick voice bridge"
+        echo ""
+        echo "  talk-to-ghost-v2 \"msg\"      Rick thinks + speaks (ElevenLabs voice)"
+        echo "  talk-to-ghost-v2            Interactive text chat"
+        echo "  talk-to-ghost-v2 --voice    Full voice mode (Mac mic → Ghost)"
+        echo "  talk-to-ghost-v2 --ear-on   Start Ghost's listener daemon"
+        echo "  talk-to-ghost-v2 --ear-off  Stop listener"
+        echo "  talk-to-ghost-v2 --status   Ghost system status"
+        ;;
+    "")
+        # Interactive text mode
+        echo "🥒 Chat with Pickle Rick (type 'quit' to exit)"
+        echo ""
+        while true; do
+            read -p "You: " INPUT
+            [ "$INPUT" = "quit" ] && break
+            [ -z "$INPUT" ] && continue
+            echo -e "\033[0;33mRick is thinking...\033[0m"
+            RESPONSE=$(ghost_think_and_speak "$INPUT")
+            echo -e "\033[1;32m🥒 Rick:\033[0m $RESPONSE"
+            echo ""
+        done
+        ;;
+    *)
+        # One-shot message
+        ghost_think_and_speak "$1"
+        ;;
+esac

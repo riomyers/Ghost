@@ -1,0 +1,89 @@
+#!/usr/bin/env bash
+# talk-to-ghost — Send a message to Ghost from Mac. Ghost thinks and speaks.
+# Usage:
+#   talk-to-ghost "What's up?"        — one-shot message, Ghost speaks response
+#   talk-to-ghost                      — interactive mode
+#   talk-to-ghost --ear-on             — start ear daemon on Ghost
+#   talk-to-ghost --ear-off            — stop ear daemon
+#   talk-to-ghost --status             — check Ghost voice status
+#   talk-to-ghost --log                — show ear daemon log
+
+set -euo pipefail
+
+GHOST="ghost"  # SSH config alias
+GREEN='\033[0;32m'
+CYAN='\033[0;36m'
+YELLOW='\033[1;33m'
+NC='\033[0m'
+
+# Safely escape a string for remote shell
+quote_for_ssh() {
+    printf '%s' "$1" | sed "s/'/'\\\\''/g"
+}
+
+ghost_think() {
+    local safe_input
+    safe_input=$(quote_for_ssh "$1")
+    ssh "$GHOST" "python3 ~/ghost/bin/ghost-think '${safe_input}'" 2>/dev/null
+}
+
+ghost_think_and_speak() {
+    local safe_input
+    safe_input=$(quote_for_ssh "$1")
+    # Get text response only (--text skips TTS); we handle speech separately via ghost_speak
+    ssh "$GHOST" "python3 ~/ghost/bin/ghost-think --text '${safe_input}'" 2>/dev/null
+}
+
+ghost_speak() {
+    local safe_text
+    safe_text=$(quote_for_ssh "$1")
+    ssh "$GHOST" "tmux send-keys -t ghost \"python3 ~/ghost/bin/ghost-say '${safe_text}' &\" Enter" 2>/dev/null &
+}
+
+case "${1:-}" in
+    --ear-on)
+        echo -e "${CYAN}👂 Starting ear daemon on Ghost...${NC}"
+        ssh "$GHOST" "tmux send-keys -t ghost 'python3 ~/ghost/bin/ghost-ear start' Enter"
+        sleep 1
+        ssh "$GHOST" "python3 ~/ghost/bin/ghost-ear status"
+        ;;
+    --ear-off)
+        echo -e "${YELLOW}Stopping ear daemon on Ghost...${NC}"
+        ssh "$GHOST" "python3 ~/ghost/bin/ghost-ear stop"
+        ;;
+    --status)
+        echo -e "${CYAN}=== Ghost Voice Status ===${NC}"
+        ssh "$GHOST" "python3 ~/ghost/bin/ghost-ear status 2>/dev/null || echo 'Ear: not available'"
+        ssh "$GHOST" "python3 -c 'import sys; sys.path.insert(0, \"/home/atom/ghost/lib\"); import voice; print(\"TTS: ready\")' 2>/dev/null || echo 'TTS: not available'"
+        ssh "$GHOST" "python3 -c 'import faster_whisper; print(\"STT: ready\")' 2>/dev/null || echo 'STT: not available'"
+        ssh "$GHOST" "curl -sf http://localhost:11434/api/tags | python3 -c 'import json,sys; models=[m[\"name\"] for m in json.load(sys.stdin)[\"models\"]]; print(f\"Ollama: {len(models)} models — \" + \", \".join(models))' 2>/dev/null || echo 'Ollama: not available'"
+        ;;
+    --log)
+        ssh "$GHOST" "python3 ~/ghost/bin/ghost-ear log ${2:-20}"
+        ;;
+    "")
+        # Interactive mode
+        echo -e "${GREEN}🥒 Talk to Ghost (Pickle Rick mode)${NC}"
+        echo -e "${CYAN}Type messages, Ghost thinks and speaks. Ctrl+C to exit.${NC}"
+        echo ""
+        while true; do
+            echo -ne "${GREEN}You: ${NC}"
+            read -r input
+            if [[ -z "$input" ]]; then
+                continue
+            fi
+            response=$(ghost_think_and_speak "$input")
+            echo -e "${CYAN}Rick: ${response}${NC}"
+            # Ghost speaks it aloud on the machine
+            ghost_speak "$response"
+        done
+        ;;
+    *)
+        # One-shot message
+        message="$*"
+        response=$(ghost_think_and_speak "$message")
+        echo -e "${CYAN}Rick: ${response}${NC}"
+        # Ghost speaks it aloud
+        ghost_speak "$response"
+        ;;
+esac

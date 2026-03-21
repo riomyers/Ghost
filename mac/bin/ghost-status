@@ -1,0 +1,25 @@
+#!/usr/bin/env bash
+# ghost-status — check Ghost machine status from Mac
+
+HOST="ghost"
+TIMEOUT=5
+
+if ssh -o ConnectTimeout=$TIMEOUT -o BatchMode=yes "$HOST" "echo OK" &>/dev/null; then
+    UPTIME=$(ssh -o ConnectTimeout=$TIMEOUT "$HOST" "uptime -p" 2>/dev/null)
+    LOAD=$(ssh -o ConnectTimeout=$TIMEOUT "$HOST" "cat /proc/loadavg | cut -d' ' -f1-3" 2>/dev/null)
+    MEM=$(ssh -o ConnectTimeout=$TIMEOUT "$HOST" "free -h | awk '/Mem:/{printf \"%s/%s (%.0f%%)\", \$3, \$2, \$3/\$2*100}'" 2>/dev/null)
+    DISK=$(ssh -o ConnectTimeout=$TIMEOUT "$HOST" "df -h / | awk 'NR==2{printf \"%s/%s (%s)\", \$3, \$2, \$5}'" 2>/dev/null)
+    IP=$(ssh -o ConnectTimeout=$TIMEOUT "$HOST" "hostname -I | cut -d' ' -f1" 2>/dev/null)
+    TEMP=$(ssh -o ConnectTimeout=$TIMEOUT "$HOST" "cat /sys/class/thermal/thermal_zone0/temp 2>/dev/null | awk '{printf \"%.1f°C\", \$1/1000}'" 2>/dev/null)
+
+    echo "👻 Ghost is ALIVE"
+    echo "   IP:     $IP"
+    echo "   Uptime: $UPTIME"
+    echo "   Load:   $LOAD"
+    echo "   Memory: $MEM"
+    echo "   Disk:   $DISK"
+    [ -n "$TEMP" ] && echo "   Temp:   $TEMP"
+else
+    echo "💀 Ghost is DEAD (unreachable)"
+    exit 1
+fi

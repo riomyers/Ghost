@@ -1,0 +1,15 @@
+[Unit]
+Description=Ghost Ear Daemon — always-on microphone listener
+After=network.target sound.target
+
+[Service]
+Type=forking
+User=atom
+ExecStart=/home/atom/.local/bin/ghost-ear start
+ExecStop=/home/atom/.local/bin/ghost-ear stop
+PIDFile=/home/atom/ghost/.ear.pid
+Restart=on-failure
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target

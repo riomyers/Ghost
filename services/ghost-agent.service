@@ -1,0 +1,25 @@
+[Unit]
+Description=Pickle Rick Ghost Agent — autonomous coding daemon
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=atom
+ExecStart=/home/atom/.local/bin/ghost-agent
+Restart=always
+RestartSec=30
+Environment=HOME=/home/atom
+Environment=PATH=/home/atom/.local/bin:/usr/local/bin:/usr/bin:/bin
+WorkingDirectory=/home/atom
+
+# Resource limits — don't let the agent eat the machine
+CPUQuota=80%
+MemoryMax=8G
+
+# Logging
+StandardOutput=append:/home/atom/ghost/logs/agent.log
+StandardError=append:/home/atom/ghost/logs/agent.log
+
+[Install]
+WantedBy=multi-user.target

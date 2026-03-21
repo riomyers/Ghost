@@ -1,0 +1,63 @@
+#!/usr/bin/env python3
+"""ghost-think — Think about input and respond with Pickle Rick's voice."""
+
+import sys
+import os
+import json
+from pathlib import Path
+
+sys.path.insert(0, os.path.expanduser("~/ghost/lib"))
+
+import brain
+import voice
+
+CONVO_FILE = Path.home() / ".config" / "ghost" / "conversation.json"
+
+def load_conversation():
+    if CONVO_FILE.exists():
+        try:
+            return json.loads(CONVO_FILE.read_text())[-10:]  # Last 5 exchanges
+        except (json.JSONDecodeError, KeyError):
+            pass
+    return []
+
+def save_conversation(convo):
+    CONVO_FILE.parent.mkdir(parents=True, exist_ok=True)
+    # Keep last 20 messages
+    CONVO_FILE.write_text(json.dumps(convo[-20:], indent=2))
+
+def main():
+    speak = "--silent" not in sys.argv
+    text_only = "--text" in sys.argv
+    args = [a for a in sys.argv[1:] if not a.startswith("--")]
+
+    if args:
+        user_input = " ".join(args)
+    elif not sys.stdin.isatty():
+        user_input = sys.stdin.read().strip()
+    else:
+        print("Usage: ghost-think <message>", file=sys.stderr)
+        print("  ghost-think 'What is the meaning of life?'", file=sys.stderr)
+        print("  ghost-think --silent 'quiet mode'", file=sys.stderr)
+        print("  ghost-think --text 'text only, no speech'", file=sys.stderr)
+        sys.exit(1)
+
+    if not user_input:
+        sys.exit(1)
+
+    convo = load_conversation()
+    response = brain.think(user_input, conversation=convo)
+
+    # Update conversation
+    convo.append({"role": "user", "content": user_input})
+    convo.append({"role": "assistant", "content": response})
+    save_conversation(convo)
+
+    print(response)
+
+    if speak and not text_only:
+        voice.say(response)
+
+
+if __name__ == "__main__":
+    main()

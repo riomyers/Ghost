@@ -1,0 +1,74 @@
+#!/usr/bin/env bash
+# talk-to-ghost — Send a message to Ghost from Mac. Ghost thinks and speaks.
+# Usage:
+#   talk-to-ghost "What's up?"        — one-shot message, Ghost speaks response
+#   talk-to-ghost                      — interactive mode
+#   talk-to-ghost --ear-on             — start ear daemon on Ghost
+#   talk-to-ghost --ear-off            — stop ear daemon
+#   talk-to-ghost --status             — check Ghost voice status
+#   talk-to-ghost --log                — show ear daemon log
+
+set -euo pipefail
+
+GHOST="ghost"  # SSH config alias
+GREEN='\033[0;32m'
+CYAN='\033[0;36m'
+YELLOW='\033[1;33m'
+NC='\033[0m'
+
+ghost_exec() {
+    ssh "$GHOST" "tmux send-keys -t ghost '$1' Enter" 2>/dev/null
+    # Also run directly for output capture
+    ssh "$GHOST" "$1" 2>/dev/null
+}
+
+ghost_visible() {
+    # Run in tmux for visibility, capture output directly
+    ssh "$GHOST" "$1" 2>/dev/null
+}
+
+case "${1:-}" in
+    --ear-on)
+        echo -e "${CYAN}👂 Starting ear daemon on Ghost...${NC}"
+        ssh "$GHOST" "tmux send-keys -t ghost 'python3 ~/ghost/bin/ghost-ear start' Enter"
+        sleep 1
+        ssh "$GHOST" "python3 ~/ghost/bin/ghost-ear status"
+        ;;
+    --ear-off)
+        echo -e "${YELLOW}Stopping ear daemon on Ghost...${NC}"
+        ssh "$GHOST" "python3 ~/ghost/bin/ghost-ear stop"
+        ;;
+    --status)
+        echo -e "${CYAN}=== Ghost Voice Status ===${NC}"
+        ssh "$GHOST" "python3 ~/ghost/bin/ghost-ear status 2>/dev/null || echo 'Ear: not available'"
+        ssh "$GHOST" "python3 -c 'import sys; sys.path.insert(0, \"/root/ghost/lib\"); import voice; print(\"TTS: ready\")' 2>/dev/null || echo 'TTS: not available'"
+        ssh "$GHOST" "python3 -c 'import faster_whisper; print(\"STT: ready\")' 2>/dev/null || echo 'STT: not available'"
+        ssh "$GHOST" "curl -sf http://localhost:11434/api/tags | python3 -c 'import json,sys; models=[m[\"name\"] for m in json.load(sys.stdin)[\"models\"]]; print(f\"Ollama: {len(models)} models — \" + \", \".join(models))' 2>/dev/null || echo 'Ollama: not available'"
+        ;;
+    --log)
+        ssh "$GHOST" "python3 ~/ghost/bin/ghost-ear log ${2:-20}"
+        ;;
+    "")
+        # Interactive mode
+        echo -e "${GREEN}🥒 Talk to Ghost (Pickle Rick mode)${NC}"
+        echo -e "${CYAN}Type messages, Ghost thinks and speaks. Ctrl+C to exit.${NC}"
+        echo ""
+        while true; do
+            echo -ne "${GREEN}You: ${NC}"
+            read -r input
+            if [[ -z "$input" ]]; then
+                continue
+            fi
+            response=$(ssh "$GHOST" "python3 ~/ghost/bin/ghost-think --text '$input'" 2>/dev/null)
+            echo -e "${CYAN}Rick: ${response}${NC}"
+            # Ghost speaks it aloud on the machine
+            ssh "$GHOST" "tmux send-keys -t ghost \"python3 ~/ghost/bin/ghost-say '$(echo "$response" | sed "s/'/'\\\\''/g")' &\" Enter" 2>/dev/null &
+        done
+        ;;
+    *)
+        # One-shot message
+        message="$*"
+        response=$(ssh "$GHOST" "python3 ~/ghost/bin/ghost-think '$message'" 2>/dev/null)
+        echo -e "${CYAN}Rick: ${response}${NC}"
+        ;;
+esac

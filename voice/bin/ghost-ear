@@ -1,0 +1,197 @@
+#!/usr/bin/env python3
+"""ghost-ear — Background listening daemon. Hears you, thinks, speaks back."""
+
+import sys
+import os
+import signal
+import time
+import json
+from pathlib import Path
+from datetime import datetime
+
+sys.path.insert(0, os.path.expanduser("~/ghost/lib"))
+
+PID_FILE = Path.home() / ".config" / "ghost" / "ear.pid"
+LOG_FILE = Path.home() / ".config" / "ghost" / "ear.log"
+WAKE_WORDS = ["ghost", "hey ghost", "pickle rick", "rick", "hey rick", "pickle", "yo ghost", "yo rick", "hey pickle"]
+
+def log(msg):
+    ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    line = f"[{ts}] {msg}"
+    print(line, flush=True)
+    LOG_FILE.parent.mkdir(parents=True, exist_ok=True)
+    with open(LOG_FILE, "a") as f:
+        f.write(line + "\n")
+
+def is_running():
+    if PID_FILE.exists():
+        pid = int(PID_FILE.read_text().strip())
+        try:
+            os.kill(pid, 0)
+            return True
+        except OSError:
+            PID_FILE.unlink(missing_ok=True)
+    return False
+
+def stop():
+    if PID_FILE.exists():
+        pid = int(PID_FILE.read_text().strip())
+        try:
+            os.kill(pid, signal.SIGTERM)
+            log(f"Stopped ear daemon (PID {pid})")
+        except OSError:
+            pass
+        PID_FILE.unlink(missing_ok=True)
+    else:
+        print("Ear daemon not running.", file=sys.stderr)
+
+def status():
+    if is_running():
+        pid = int(PID_FILE.read_text().strip())
+        print(f"👂 Ear daemon running (PID {pid})")
+    else:
+        print("👂 Ear daemon not running")
+
+def show_log(lines=20):
+    if LOG_FILE.exists():
+        all_lines = LOG_FILE.read_text().strip().split("\n")
+        for line in all_lines[-lines:]:
+            print(line)
+    else:
+        print("No ear log yet.")
+
+def has_wake_word(text):
+    text_lower = text.lower().strip()
+    for word in WAKE_WORDS:
+        if word in text_lower:
+            return True
+    return False
+
+def strip_wake_word(text):
+    text_lower = text.lower().strip()
+    for word in sorted(WAKE_WORDS, key=len, reverse=True):
+        if text_lower.startswith(word):
+            remainder = text[len(word):].strip().lstrip(",").strip()
+            return remainder if remainder else None
+    return text
+
+def daemon_loop():
+    import ear
+    import brain
+    import voice
+
+    PID_FILE.parent.mkdir(parents=True, exist_ok=True)
+    PID_FILE.write_text(str(os.getpid()))
+
+    def cleanup(sig, frame):
+        log("Ear daemon shutting down")
+        PID_FILE.unlink(missing_ok=True)
+        sys.exit(0)
+
+    signal.signal(signal.SIGTERM, cleanup)
+    signal.signal(signal.SIGINT, cleanup)
+
+    log("Ear daemon started — listening for wake words")
+    convo = []
+
+    while True:
+        try:
+            text = ear.listen(timeout=10, silence_sec=2.0)
+            if not text:
+                continue
+
+            log(f"Heard: {text}")
+
+            if has_wake_word(text):
+                message = strip_wake_word(text)
+                if message:
+                    log(f"Wake word + command: {message}")
+                    response = brain.think(message, conversation=convo)
+                    convo.append({"role": "user", "content": message})
+                    convo.append({"role": "assistant", "content": response})
+                    convo = convo[-20:]
+                    log(f"Response: {response}")
+                    voice.say(response)
+                else:
+                    log("Wake word detected — waiting for command...")
+                    voice.say("Yeah?")
+                    # Listen for the actual command
+                    time.sleep(0.3)
+                    command = ear.listen(timeout=15, silence_sec=1.5)
+                    if command:
+                        log(f"Command: {command}")
+                        response = brain.think(command, conversation=convo)
+                        convo.append({"role": "user", "content": command})
+                        convo.append({"role": "assistant", "content": response})
+                        convo = convo[-20:]
+                        log(f"Response: {response}")
+                        voice.say(response)
+                    else:
+                        log("No command after wake word")
+            # Ignore non-wake-word audio
+
+        except KeyboardInterrupt:
+            break
+        except Exception as e:
+            log(f"Error: {e}")
+            time.sleep(2)
+
+    cleanup(None, None)
+
+
+def main():
+    if len(sys.argv) < 2:
+        print("Usage: ghost-ear <start|stop|status|log>", file=sys.stderr)
+        sys.exit(1)
+
+    cmd = sys.argv[1]
+
+    if cmd == "start":
+        if is_running():
+            print("Ear daemon already running.", file=sys.stderr)
+            sys.exit(1)
+        if "--foreground" in sys.argv:
+            daemon_loop()
+        else:
+            # Daemonize with double-fork
+            pid = os.fork()
+            if pid > 0:
+                # Parent waits briefly for child to write PID
+                time.sleep(0.5)
+                print(f"👂 Ear daemon started")
+                os._exit(0)
+            os.setsid()
+            # Second fork to fully detach
+            pid2 = os.fork()
+            if pid2 > 0:
+                os._exit(0)
+            # Close inherited fds
+            os.close(0)
+            os.close(1)
+            os.close(2)
+            # Redirect to log
+            LOG_FILE.parent.mkdir(parents=True, exist_ok=True)
+            fd = os.open(str(LOG_FILE), os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o644)
+            os.dup2(fd, 1)
+            os.dup2(fd, 2)
+            os.open(os.devnull, os.O_RDONLY)  # stdin
+            daemon_loop()
+    elif cmd == "stop":
+        stop()
+    elif cmd == "status":
+        status()
+    elif cmd == "log":
+        lines = 20
+        if len(sys.argv) > 2:
+            try:
+                lines = int(sys.argv[2])
+            except ValueError:
+                pass
+        show_log(lines)
+    else:
+        print(f"Unknown command: {cmd}", file=sys.stderr)
+        sys.exit(1)
+
+
+if __name__ == "__main__":
+    main()

@@ -1,0 +1,120 @@
+#!/usr/bin/env python3
+"""ghost-api — HTTP bridge for Ghost to reach atomd chat endpoint.
+
+Runs on Mac, listens on LAN port 7421. Ghost calls this with simple HTTP.
+Proxies to atomd via Unix socket.
+"""
+
+import http.server
+import json
+import os
+import signal
+import socket
+import socketserver
+import sys
+from pathlib import Path
+
+PORT = int(os.environ.get("GHOST_API_PORT", "7421"))
+SOCKET_PATH = Path.home() / ".config" / "atom" / "atomd.sock"
+
+
+def atomd_send(request):
+    """Send a command to atomd via UDS."""
+    sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    sock.settimeout(60)
+    try:
+        sock.connect(str(SOCKET_PATH))
+        sock.sendall(json.dumps(request).encode() + b"\n")
+        data = b""
+        while True:
+            chunk = sock.recv(8192)
+            if not chunk:
+                break
+            data += chunk
+            try:
+                json.loads(data)
+                break
+            except json.JSONDecodeError:
+                continue
+        return json.loads(data)
+    finally:
+        sock.close()
+
+
+class GhostAPIHandler(http.server.BaseHTTPRequestHandler):
+    def do_POST(self):
+        length = int(self.headers.get("Content-Length", 0))
+        body = self.rfile.read(length) if length else b""
+
+        try:
+            args = json.loads(body) if body else {}
+        except json.JSONDecodeError:
+            self._respond(400, {"error": "invalid JSON"})
+            return
+
+        if self.path == "/chat":
+            message = args.get("message", "")
+            persona = args.get("persona", "rick")
+            project = args.get("project", "pickle-rick")
+
+            if not message:
+                self._respond(400, {"error": "empty message"})
+                return
+
+            result = atomd_send({
+                "module": "chat",
+                "command": "respond",
+                "args": {"message": message, "persona": persona, "project": project}
+            })
+
+            inner = result.get("result", result)
+            if isinstance(inner, dict) and inner.get("ok") is not None:
+                self._respond(200, inner)
+            else:
+                self._respond(200, result)
+
+        elif self.path == "/ping":
+            self._respond(200, {"ok": True, "service": "ghost-api"})
+
+        else:
+            self._respond(404, {"error": "not found"})
+
+    def do_GET(self):
+        if self.path == "/ping":
+            self._respond(200, {"ok": True, "service": "ghost-api"})
+        else:
+            self._respond(404, {"error": "not found"})
+
+    def _respond(self, code, data):
+        body = json.dumps(data).encode()
+        self.send_response(code)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+    def log_message(self, format, *args):
+        pass  # Suppress access logs
+
+
+class ThreadingGhostServer(socketserver.ThreadingMixIn, http.server.HTTPServer):
+    """Threading HTTP server — handles concurrent requests without blocking."""
+    daemon_threads = True
+    allow_reuse_address = True
+
+
+def main():
+    # Ignore SIGHUP so nohup/background execution works reliably
+    signal.signal(signal.SIGHUP, signal.SIG_IGN)
+
+    server = ThreadingGhostServer(("0.0.0.0", PORT), GhostAPIHandler)
+    print(f"Ghost API bridge listening on 0.0.0.0:{PORT}", flush=True)
+    try:
+        server.serve_forever()
+    except KeyboardInterrupt:
+        print("\nShutting down", flush=True)
+        server.shutdown()
+
+
+if __name__ == "__main__":
+    main()

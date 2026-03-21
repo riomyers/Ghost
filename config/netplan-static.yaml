@@ -1,0 +1,16 @@
+# /etc/netplan/99-ghost-static.yaml
+# Static IP for Ghost on wired ethernet
+network:
+  version: 2
+  ethernets:
+    enp1s0f0:  # 2012 MacBook Pro ethernet — verify with `ip link`
+      dhcp4: no
+      addresses:
+        - 192.168.1.84/24
+      routes:
+        - to: default
+          via: 192.168.1.1
+      nameservers:
+        addresses:
+          - 1.1.1.1
+          - 8.8.8.8

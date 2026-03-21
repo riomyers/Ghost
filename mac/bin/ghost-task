@@ -1,0 +1,44 @@
+#!/usr/bin/env bash
+# ghost-task — dispatch tasks to Ghost's autonomous worker
+# Usage: ghost-task <script.sh>          — send a task file
+#        ghost-task -c "commands here"   — send inline commands
+#        ghost-task status               — show task queue status
+#        ghost-task logs [name]          — show task logs
+#        ghost-task list                 — list completed/failed/pending
+
+HOST="ghost"
+TASK_DIR="/home/atom/tasks"
+
+case "${1:-}" in
+    status)
+        ssh "$HOST" "echo 'Pending:'; ls $TASK_DIR/new/ 2>/dev/null || echo '  (none)'; echo 'Running:'; ls $TASK_DIR/in_progress/ 2>/dev/null || echo '  (none)'; echo 'Completed:'; ls $TASK_DIR/completed/ 2>/dev/null | tail -5; echo 'Failed:'; ls $TASK_DIR/failed/ 2>/dev/null | tail -5"
+        ;;
+    logs)
+        if [ -n "${2:-}" ]; then
+            ssh "$HOST" "cat $TASK_DIR/logs/${2%.sh}.log 2>/dev/null || cat $TASK_DIR/logs/$2 2>/dev/null || echo 'No log found for: $2'"
+        else
+            ssh "$HOST" "ls -lt $TASK_DIR/logs/*.log 2>/dev/null | head -10"
+        fi
+        ;;
+    list)
+        ssh "$HOST" "echo '=== COMPLETED ===' && ls -lt $TASK_DIR/completed/ 2>/dev/null | head -10 && echo '=== FAILED ===' && ls -lt $TASK_DIR/failed/ 2>/dev/null | head -10 && echo '=== PENDING ===' && ls -lt $TASK_DIR/new/ 2>/dev/null | head -10"
+        ;;
+    -c)
+        shift
+        TASK_NAME="task-$(date +%s).sh"
+        echo "#!/bin/bash" > "/tmp/$TASK_NAME"
+        echo "$*" >> "/tmp/$TASK_NAME"
+        scp -q "/tmp/$TASK_NAME" "$HOST:$TASK_DIR/new/"
+        rm "/tmp/$TASK_NAME"
+        echo "Dispatched: $TASK_NAME"
+        ;;
+    *)
+        if [ -f "$1" ]; then
+            TASK_NAME="$(basename "$1")"
+            scp -q "$1" "$HOST:$TASK_DIR/new/$TASK_NAME"
+            echo "Dispatched: $TASK_NAME"
+        else
+            echo "Usage: ghost-task <script.sh> | -c \"command\" | status | logs [name] | list"
+        fi
+        ;;
+esac

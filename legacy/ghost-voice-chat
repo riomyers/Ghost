@@ -1,0 +1,105 @@
+#!/bin/bash
+# ghost-voice-chat — Full voice conversation loop between Rio and Pickle Rick.
+# Rio speaks → Whisper transcribes → Claude thinks → ElevenLabs speaks back.
+# Runs ON Ghost. Rio talks to Ghost's mic, hears Rick's voice from Ghost's speakers.
+#
+# Can also be invoked from Mac via: ssh ghost "ghost-voice-chat --single 'message'"
+
+set -euo pipefail
+
+GHOST_HOME="$HOME/ghost"
+LOG="$GHOST_HOME/logs/voice-chat.log"
+CLAUDE_KEY="$GHOST_HOME/config/.anthropic_key"
+RECORD_DURATION="${VOICE_DURATION:-5}"
+
+mkdir -p "$(dirname "$LOG")"
+
+log() { echo "[$(date '+%H:%M:%S')] $1" | tee -a "$LOG"; }
+
+SYSTEM_PROMPT="You are Pickle Rick, having a voice conversation with Rio. Keep responses SHORT — 1-3 sentences. You're speaking out loud through Ghost's speakers, so be conversational. Cynical, manic, arrogant genius. Occasional *belch*. Never break character."
+
+ask_claude() {
+    local msg="$1"
+    local key=$(cat "$CLAUDE_KEY" 2>/dev/null)
+    local escaped_msg=$(python3 -c "import json,sys; print(json.dumps(sys.argv[1]))" "$msg")
+    local escaped_sys=$(python3 -c "import json,sys; print(json.dumps(sys.argv[1]))" "$SYSTEM_PROMPT")
+
+    curl -s --max-time 30 "https://api.anthropic.com/v1/messages" \
+        -H "x-api-key: $key" \
+        -H "anthropic-version: 2023-06-01" \
+        -H "content-type: application/json" \
+        -d "{\"model\":\"claude-sonnet-4-20250514\",\"max_tokens\":200,\"system\":$escaped_sys,\"messages\":[{\"role\":\"user\",\"content\":$escaped_msg}]}" \
+    | python3 -c "
+import sys,json
+try:
+    r=json.load(sys.stdin)
+    if 'content' in r and len(r['content'])>0: print(r['content'][0]['text'])
+    else: print('My brain is offline.')
+except: print('My brain is offline.')
+"
+}
+
+listen() {
+    local wav="/tmp/ghost-listen-$$.wav"
+    log "🎤 Listening (${RECORD_DURATION}s)..."
+
+    # Record from mic
+    arecord -q -f cd -t wav -d "$RECORD_DURATION" "$wav" 2>/dev/null
+
+    if [ ! -s "$wav" ]; then
+        log "No audio captured"
+        rm -f "$wav"
+        return 1
+    fi
+
+    # Transcribe with Whisper
+    local text=$(python3 -c "
+import whisper, sys
+model = whisper.load_model('base')
+result = model.transcribe('$wav', language='en')
+print(result['text'].strip())
+" 2>/dev/null)
+
+    rm -f "$wav"
+    echo "$text"
+}
+
+# Single message mode (for SSH)
+if [ "${1:-}" = "--single" ]; then
+    shift
+    MESSAGE="$*"
+    log "📱 Remote: $MESSAGE"
+    RESPONSE=$(ask_claude "$MESSAGE")
+    log "🥒 Rick: $RESPONSE"
+    ghost-say "$RESPONSE" --speak
+    echo "$RESPONSE"
+    exit 0
+fi
+
+# Interactive voice loop
+log "========================================="
+log "🥒 Ghost Voice Chat — Pickle Rick is listening"
+log "Speak into Ghost's mic. Ctrl+C to quit."
+log "========================================="
+
+while true; do
+    HEARD=$(listen) || continue
+
+    # Skip empty or too short
+    CLEAN=$(echo "$HEARD" | tr -d '[:space:]')
+    if [ ${#CLEAN} -lt 3 ]; then
+        log "(silence)"
+        continue
+    fi
+
+    log "🗣 Rio: $HEARD"
+
+    # Think
+    RESPONSE=$(ask_claude "$HEARD")
+    log "🥒 Rick: $RESPONSE"
+
+    # Speak with Pickle Rick's voice
+    ghost-say "$RESPONSE" --speak
+
+    echo ""
+done

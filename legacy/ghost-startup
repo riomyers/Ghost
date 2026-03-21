@@ -1,0 +1,34 @@
+#!/bin/bash
+# ghost-startup — Idempotent startup script. Run on boot or manually.
+# Ensures all Ghost services are running.
+
+set -euo pipefail
+
+GHOST_HOME="$HOME/ghost"
+LOG="$GHOST_HOME/logs/startup.log"
+mkdir -p "$GHOST_HOME/logs"
+
+log() { echo "[$(date '+%Y-%m-%d %H:%M:%S')] $*" | tee -a "$LOG"; }
+
+log "Ghost starting up..."
+
+# Ensure PATH includes local bin
+export PATH="$HOME/.local/bin:$PATH"
+
+# Start ear daemon if not running
+if ! ghost-ear status 2>/dev/null | grep -q "LISTENING"; then
+    log "Starting ear daemon..."
+    ghost-ear start
+else
+    log "Ear daemon already running"
+fi
+
+# Report status
+log "Ghost is alive."
+echo ""
+echo "=== Ghost Status ==="
+echo "Hostname: $(hostname)"
+echo "IP: $(hostname -I 2>/dev/null | awk '{print $1}')"
+echo "Uptime: $(uptime -p 2>/dev/null || uptime)"
+echo "Ear: $(ghost-ear status 2>/dev/null)"
+echo "===================="

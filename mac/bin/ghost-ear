@@ -1,0 +1,11 @@
+#!/usr/bin/env bash
+# ghost-ear — Mac-side control for Ghost's ear daemon
+set -euo pipefail
+
+case "${1:-status}" in
+    start|on)   ssh ghost "python3 ~/ghost/bin/ghost-ear start" ;;
+    stop|off)   ssh ghost "python3 ~/ghost/bin/ghost-ear stop" ;;
+    status)     ssh ghost "python3 ~/ghost/bin/ghost-ear status" ;;
+    log)        ssh ghost "python3 ~/ghost/bin/ghost-ear log ${2:-20}" ;;
+    *)          echo "Usage: ghost-ear <start|stop|status|log>" ;;
+esac

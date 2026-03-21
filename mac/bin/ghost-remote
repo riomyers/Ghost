@@ -1,0 +1,45 @@
+#!/bin/bash
+# ghost-remote — Control Ghost from Mac
+# Usage: ghost-remote status|agent-log|queue|task "description"|wake|sleep|ssh
+
+GHOST="ghost"
+
+case "${1:-status}" in
+    status)
+        ssh "$GHOST" "~/.local/bin/ghost-status" 2>/dev/null || echo "Ghost is unreachable"
+        ;;
+    agent-log)
+        ssh "$GHOST" "tail -${2:-30} ~/ghost/logs/agent.log" 2>/dev/null
+        ;;
+    queue)
+        ssh "$GHOST" "cat ~/ghost/agent-queue.jsonl 2>/dev/null || echo 'Empty'"
+        ;;
+    task)
+        shift
+        REPO="${1:-}"
+        ISSUE="${2:-}"
+        if [ -z "$REPO" ] || [ -z "$ISSUE" ]; then
+            echo "Usage: ghost-remote task <repo> <issue-description>"
+            exit 1
+        fi
+        ssh "$GHOST" "echo '{\"repo\": \"$REPO\", \"issue\": \"$ISSUE\", \"ts\": \"$(date -Iseconds)\", \"source\": \"remote\"}' >> ~/ghost/agent-queue.jsonl"
+        echo "🥒 Task queued on Ghost: $ISSUE in $REPO"
+        ;;
+    ssh)
+        ssh "$GHOST"
+        ;;
+    deploy)
+        echo "Running bootstrap..."
+        ~/ghost/setup/bootstrap.sh
+        ;;
+    *)
+        echo "ghost-remote — Control Ghost from Mac"
+        echo ""
+        echo "  status       System + agent health"
+        echo "  agent-log N  Last N lines of agent log"
+        echo "  queue        Show pending tasks"
+        echo "  task R D     Queue a task (repo, description)"
+        echo "  ssh          SSH into Ghost"
+        echo "  deploy       Run full bootstrap"
+        ;;
+esac

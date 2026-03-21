@@ -1,0 +1,8 @@
+#!/usr/bin/env bash
+# ghost-sleep — safely shut down Ghost from Mac
+
+HOST="ghost"
+
+echo "Sending Ghost to sleep (shutdown)..."
+ssh "$HOST" "sudo shutdown -h now" 2>/dev/null
+echo "💀 Ghost shutdown signal sent."
