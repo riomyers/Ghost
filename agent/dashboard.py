@@ -55,7 +55,7 @@ input[type=text]{width:100%;background:#0a0a0a;border:1px solid #333;color:#0f0;
 /* Goal cards */
 .goal-card{background:#0a0a0a;border:1px solid #1a1a1a;border-radius:6px;padding:10px;margin-bottom:8px}
 .goal-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:6px}
-.goal-title{font-size:12px;color:#e0e0e0;flex:1}
+.goal-title{font-size:12px;color:#e0e0e0;flex:1;overflow-wrap:break-word;word-break:break-word}
 .goal-meta{display:flex;gap:8px;align-items:center}
 .priority{background:#1a1a2a;color:#88f;padding:2px 6px;border-radius:3px;font-size:10px;font-weight:bold}
 .conf-badge{padding:2px 6px;border-radius:3px;font-size:10px}
@@ -76,7 +76,7 @@ input[type=text]{width:100%;background:#0a0a0a;border:1px solid #333;color:#0f0;
 .feed-icon.reflect{background:#2a1a2a;color:#c8f}
 .feed-body{flex:1;line-height:1.4}
 .feed-label{font-size:10px;color:#555}
-.feed-content{color:#ccc}
+.feed-content{color:#ccc;overflow-wrap:break-word;word-break:break-word}
 .explain-btn{background:none;border:1px solid #333;color:#888;padding:2px 6px;border-radius:3px;font-size:9px;cursor:pointer;margin-left:6px}
 .explain-btn:hover{border-color:#0af;color:#0af}
 .explain-result{background:#050510;border:1px solid #0af;border-radius:4px;padding:8px;margin-top:6px;font-size:11px;color:#8af;display:none}
@@ -86,7 +86,7 @@ input[type=text]{width:100%;background:#0a0a0a;border:1px solid #333;color:#0f0;
 .filter{background:#1a1a1a;border:1px solid #222;color:#888;padding:3px 8px;border-radius:3px;font-size:10px;cursor:pointer}
 .filter.active{border-color:#0af;color:#0af}
 .filter:hover{border-color:#333}
-.res{background:#050505;border:1px solid #1a1a1a;border-radius:4px;padding:8px;margin-top:8px;font-size:11px;max-height:120px;overflow-y:auto;white-space:pre-wrap}
+.res{background:#050505;border:1px solid #1a1a1a;border-radius:4px;padding:8px;margin-top:8px;font-size:11px;max-height:120px;overflow-y:auto;white-space:pre-wrap;overflow-wrap:break-word;word-break:break-word}
 </style>
 </head>
 <body>
@@ -122,7 +122,7 @@ input[type=text]{width:100%;background:#0a0a0a;border:1px solid #333;color:#0f0;
 {% for g in goals %}
 <div class="goal-card">
 <div class="goal-header">
-<div class="goal-title">{{ g.description[:90] }}</div>
+<div class="goal-title">{{ g.description }}</div>
 <div class="goal-meta">
 <span class="priority">P{{ g.priority }}</span>
 {% if g.confidence is not none %}
@@ -329,7 +329,7 @@ def get_enriched_goals():
 
         if last_task:
             tool = last_task['tool_name'] or '?'
-            result = (last_task['result'] or '')[:60]
+            result = last_task['result'] or ''
             g['last_action'] = f'{tool}: {result}'
         else:
             g['last_action'] = ''
@@ -345,7 +345,7 @@ def get_feed(limit=30):
 
     goal_names = {}
     for r in db.execute('SELECT id, description FROM goals'):
-        goal_names[str(r['id'])] = r['description'][:50]
+        goal_names[str(r['id'])] = r['description']
 
     # Think events
     for r in db.execute("""SELECT id, phase, details, created_at FROM action_log
@@ -387,7 +387,7 @@ def get_feed(limit=30):
                           ORDER BY t.id DESC LIMIT ?""", (limit,)):
         time_str = r['completed_at'][11:16] if r['completed_at'] else ''
         tool = r['tool_name'] or '?'
-        result = (r['result'] or '')[:80]
+        result = r['result'] or ''
         failed = r['status'] == 'failed'
 
         feed.append({
@@ -408,7 +408,7 @@ def get_feed(limit=30):
             'type': 'sense',
             'icon': '👁',
             'label': 'Sensed',
-            'text': (r['details'] or '')[:80],
+            'text': r['details'] or '',
             'time': time_str,
             'details_id': None
         })
@@ -472,12 +472,12 @@ def action():
     if a in ACTIONS:
         try:
             r = subprocess.run(['bash', '-c', ACTIONS[a]], capture_output=True, text=True, timeout=120)
-            result = (r.stdout + r.stderr).strip()[:400]
+            result = (r.stdout + r.stderr).strip()
         except subprocess.TimeoutExpired:
             result = 'Timed out'
         except Exception as e:
             result = str(e)[:200]
-        return redirect(f'/?r={urllib.parse.quote(result[:300])}')
+        return redirect(f'/?r={urllib.parse.quote(result[:2000])}')
     return redirect('/')
 
 
@@ -536,7 +536,7 @@ Respond helpfully and concisely (under 200 words). Be direct."""
 
         response, model, provider = nexus_client.chat(prompt, model='haiku', timeout=30)
         db_mod.record_token_usage('nexus', 1)
-        db_mod.log_action('think', f'command_bar goal={goal_id}: {response[:200]}', model='nexus')
+        db_mod.log_action('think', f'command_bar goal={goal_id}: {response}', model='nexus')
         return jsonify(response=response, goal_id=goal_id)
     except Exception as e:
         return jsonify(response=f'Queued as Goal #{goal_id}. Processing next cycle.',
@@ -554,7 +554,7 @@ def api_text():
 
     db = get_db()
     db.execute('INSERT INTO goals (description, priority, goal_type, status) VALUES (?, 10, ?, ?)',
-               (f'Reply to text from {sender}: {message[:100]}', 'communication', 'achieved'))
+               (f'Reply to text from {sender}: {message}', 'communication', 'achieved'))
     db.commit()
     db.close()
 
@@ -571,7 +571,7 @@ Your reply:"""
 
         response, _, _ = nexus_client.chat(prompt, model='haiku', timeout=30)
         db_mod.record_token_usage('nexus', 1)
-        db_mod.log_action('act', f'text_reply to={sender}: {response[:200]}', model='nexus')
+        db_mod.log_action('act', f'text_reply to={sender}: {response}', model='nexus')
         return jsonify(response=response)
     except Exception as e:
         return jsonify(response="Brain busy. Try again in a minute.", error=str(e)[:100])

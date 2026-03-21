@@ -438,14 +438,15 @@ class ObservationsFeed(Static):
             if not line:
                 continue
             # Colorize log levels
+            width = _get_usable_width(margin=16)
             if "[ERROR]" in line or "ERROR" in line:
-                formatted.append(f"  [red]{_truncate(line, 72)}[/red]")
+                formatted.append(f"  [red]{_truncate(line, width)}[/red]")
             elif "[WARN]" in line or "WARN" in line:
-                formatted.append(f"  [yellow]{_truncate(line, 72)}[/yellow]")
+                formatted.append(f"  [yellow]{_truncate(line, width)}[/yellow]")
             elif "[INFO]" in line:
-                formatted.append(f"  [dim]{_truncate(line, 72)}[/dim]")
+                formatted.append(f"  [dim]{_truncate(line, width)}[/dim]")
             else:
-                formatted.append(f"  {_truncate(line, 72)}")
+                formatted.append(f"  {_truncate(line, width)}")
 
         if len(formatted) <= 2:
             formatted.append("  [dim]No observations yet[/dim]")
@@ -504,10 +505,11 @@ class EventsPanel(Static):
                 else:
                     pc = "cyan"
 
+                evt_width = _get_usable_width(margin=30)
                 lines.append(
                     f"  [{pc}]P{pri}[/{pc}] "
                     f"[dim]{etype}[/dim] "
-                    f"{_truncate(msg, 35)}"
+                    f"{_truncate(msg, evt_width)}"
                 )
                 if src:
                     lines[-1] += f" [dim]({src})[/dim]"
@@ -571,9 +573,20 @@ class CommandBar(Input):
 # Helpers
 # ---------------------------------------------------------------------------
 
-def _truncate(text: str, maxlen: int) -> str:
-    """Truncate text with ellipsis if too long."""
-    # Strip rich markup for length calculation is complex, just use raw length
+def _get_usable_width(margin: int = 12) -> int:
+    """Get usable terminal width minus borders/padding/margins."""
+    import shutil
+    cols = shutil.get_terminal_size((120, 40)).columns
+    return max(cols - margin, 40)
+
+
+def _truncate(text: str, maxlen: int = 0) -> str:
+    """Truncate text with ellipsis if too long.
+
+    If maxlen is 0, auto-detect from terminal width.
+    """
+    if maxlen <= 0:
+        maxlen = _get_usable_width()
     if len(text) > maxlen:
         return text[:maxlen - 1] + "\u2026"
     return text

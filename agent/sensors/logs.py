@@ -72,7 +72,7 @@ def _pattern_scan(text, source):
                     findings.append({
                         'severity': severity,
                         'source': source,
-                        'message': f'{label}: {line.strip()[:150]}',
+                        'message': f'{label}: {line.strip()[:500]}',
                     })
                     break  # One finding per pattern per source
 
@@ -104,7 +104,7 @@ def sense():
     seen = set()
     unique = []
     for f in all_findings:
-        key = f['message'][:80]
+        key = f['message']
         if key not in seen:
             seen.add(key)
             unique.append(f)
@@ -131,7 +131,7 @@ Respond with 1-2 sentences: what's happening and what (if anything) to do about 
             analysis, _, _ = nexus_client.chat(prompt, model='haiku', timeout=20)
             database.record_token_usage('nexus', 1)
             database.record_observation('logs',
-                f'Log analysis: {analysis[:200]}',
+                f'Log analysis: {analysis}',
                 'critical' if criticals else 'warning')
         except Exception:
             pass
