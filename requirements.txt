@@ -1,0 +1,17 @@
+# Ghost v5 Lazarus dependencies
+# Core agent (already installed)
+faster-whisper
+elevenlabs
+
+# Track 2: Environmental Awareness
+opencv-python-headless  # CPU-only, no GUI deps
+# pyaudio not needed — using arecord + struct
+
+# Track 3: Dashboard
+textual
+
+# Track 6: Smart Home (optional — stdlib urllib is sufficient)
+# No extra deps needed
+
+# Track 7: Network Resilience (stdlib only)
+# No extra deps needed

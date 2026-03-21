@@ -1,0 +1,17 @@
+[Unit]
+Description=Ghost Service Watchdog
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/python3 /home/atom/pickle-agent/src/watchdog.py
+WorkingDirectory=/home/atom/pickle-agent
+User=atom
+Restart=always
+RestartSec=30
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

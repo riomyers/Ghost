@@ -1,0 +1,12 @@
+[Unit]
+Description=Ghost auto-update check
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/home/atom/ghost-repo/deploy.sh
+WorkingDirectory=/home/atom/ghost-repo
+User=atom
+StandardOutput=journal
+StandardError=journal
