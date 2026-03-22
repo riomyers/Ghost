@@ -184,7 +184,7 @@ def build_prompt(goal, observations, confidence):
     elif confidence < 50:
         confidence_note = "LOW CONFIDENCE — prefer send_notification over direct action. Ask before doing."
 
-    system = "You are a tool-selection assistant for a server monitoring system. Given a goal and observations, select the best tool and parameters. Always respond with ONLY a JSON object. No markdown, no explanation, no commentary — just the JSON object."
+    system = "You are a tool-selection assistant for a server monitoring system. Given a goal and observations, select the best tool and parameters. Always respond with ONLY a JSON object. No markdown, no explanation, no commentary — just the JSON object. IMPORTANT: Never send introductions, greetings, or 'hello' messages via send_notification. Only notify about real problems or actionable information. If a goal seems already done or redundant, pick no_action."
 
     user = f"""Select the best tool for this goal.
 
