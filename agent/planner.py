@@ -13,7 +13,7 @@ def plan_multi_step(goal, observations, max_steps=5):
     """Ask Claude to break a goal into multiple ordered steps."""
     obs_lines = []
     for o in observations[:8]:
-        obs_lines.append(f"[{o['severity']}] {o['source']}: {o['content'][:120]}")
+        obs_lines.append(f"[{o['severity']}] {o['source']}: {o['content'][:500]}")
     obs_text = '\n'.join(obs_lines) if obs_lines else '(none)'
 
     lessons = aor.get_failure_lessons(limit=3)
@@ -75,7 +75,7 @@ def create_task_chain(goal_id, steps):
         if tool_name and tool_name != 'no_action':
             database.create_task(
                 goal_id,
-                f'{tool_name}: {json.dumps(tool_params)[:80]}',
+                f'{tool_name}: {json.dumps(tool_params)[:200]}',
                 tool_name,
                 tool_params
             )
@@ -90,6 +90,6 @@ if __name__ == '__main__':
     if goals:
         obs = database.get_recent_observations(limit=10)
         steps = plan_multi_step(goals[0], obs)
-        print(f'Planned {len(steps)} steps for goal: {goals[0]["description"][:60]}')
+        print(f'Planned {len(steps)} steps for goal: {goals[0]["description"]}')
         for s in steps:
-            print(f'  {s["tool_name"]}: {json.dumps(s.get("tool_params", {}))[:80]}')
+            print(f'  {s["tool_name"]}: {json.dumps(s.get("tool_params", {}))}')

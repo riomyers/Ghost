@@ -20,7 +20,7 @@ NTFY_PRIORITIES = {'min': '1', 'low': '2', 'default': '3', 'high': '4', 'urgent'
 def notify(title, msg, priority='default'):
     pri = NTFY_PRIORITIES.get(priority, '3')
     try:
-        subprocess.run(['curl', '-s', '-d', msg[:500],
+        subprocess.run(['curl', '-s', '-d', msg[:4000],
                         '-H', f'Title: {title}',
                         '-H', f'Priority: {pri}',
                         NTFY_TOPIC],
@@ -47,7 +47,7 @@ def propose_change(file_path, new_content, description):
     proposed_code.write_text(new_content)
 
     notify('Ghost: Self-Mod Proposal',
-           f'I want to change {file_path}:\n{description[:300]}\n\nApprove at ghost.riomyers.com',
+           f'I want to change {file_path}:\n{description}\n\nApprove at ghost.riomyers.com',
            priority='default')
     return str(proposal_file)
 
@@ -96,8 +96,8 @@ def apply_proposal(proposal_file):
     proposal['backup'] = backup_path
     Path(proposal_file).write_text(json.dumps(proposal, indent=2))
 
-    notify('Ghost: Self-Mod Applied', f'Changed {target.name}: {proposal["description"][:200]}', priority='default')
-    return f'Applied: {proposal["description"][:100]}'
+    notify('Ghost: Self-Mod Applied', f'Changed {target.name}: {proposal["description"]}', priority='default')
+    return f'Applied: {proposal["description"]}'
 
 
 def rollback_last():

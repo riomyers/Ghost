@@ -17,7 +17,7 @@ def notify(title, message, priority='default'):
     pri = NTFY_PRIORITIES.get(priority, '3')
     try:
         subprocess.run(
-            ['curl', '-s', '-d', message[:500],
+            ['curl', '-s', '-d', message[:4000],
              '-H', f'Title: {title}',
              '-H', f'Priority: {pri}',
              NTFY_TOPIC],
@@ -115,7 +115,7 @@ Notable actions today:
 """
     for a in today_actions[:10]:
         if a['phase'] in ('think', 'act') and 'no_action' not in a.get('details', ''):
-            summary_data += f"- [{a['phase']}] {a['details'][:100]}\n"
+            summary_data += f"- [{a['phase']}] {a['details'][:300]}\n"
 
     summary_data += "\nBe concise. Focus on what Ghost actually DID, not what it thought about."
 
@@ -125,8 +125,8 @@ Notable actions today:
     except Exception:
         summary = f'Ghost EOD: {thinks} thoughts, {acts} actions, {criticals} critical alerts, {daily_tokens} API calls.'
 
-    notify('Ghost: End of Day', summary[:500], priority='low')
-    database.log_action('act', f'EOD digest sent: {summary[:200]}')
+    notify('Ghost: End of Day', summary, priority='low')
+    database.log_action('act', f'EOD digest sent: {summary}')
 
 
 def setup_scheduler():

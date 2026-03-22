@@ -57,7 +57,7 @@ def notify(title, message, priority='default'):
     pri = NTFY_PRIORITIES.get(priority, '3')
     try:
         subprocess.run(
-            ['curl', '-s', '-d', message[:500],
+            ['curl', '-s', '-d', message[:4000],
              '-H', f'Title: {title}',
              '-H', f'Priority: {pri}',
              NTFY_TOPIC],
@@ -158,11 +158,11 @@ AVAILABLE_TOOLS = """TOOLS (pick exactly one):
 def build_prompt(goal, observations, confidence):
     obs_lines = []
     for o in observations[:10]:
-        obs_lines.append(f"[{o['severity']}] {o['source']}: {o['content'][:150]}")
+        obs_lines.append(f"[{o['severity']}] {o['source']}: {o['content'][:500]}")
     obs_text = '\n'.join(obs_lines) if obs_lines else '(none)'
 
     lessons = aor.get_failure_lessons(limit=3)
-    lesson_text = '\n'.join([f"- LESSON: {l['lesson']} (from: {l['command'][:60]})" for l in lessons]) if lessons else '(none)'
+    lesson_text = '\n'.join([f"- LESSON: {l['lesson']} (from: {l['command'][:200]})" for l in lessons]) if lessons else '(none)'
 
     # Load relevant SOP
     sop_text = ""
@@ -170,7 +170,7 @@ def build_prompt(goal, observations, confidence):
     if sop_dir.exists():
         for sop in sop_dir.glob("*.md"):
             if any(kw in goal["description"].lower() for kw in sop.stem.replace("-", " ").split()):
-                sop_text = f"\nPLAYBOOK ({sop.name}):\n{sop.read_text()[:500]}\n"
+                sop_text = f"\nPLAYBOOK ({sop.name}):\n{sop.read_text()[:1500]}\n"
                 break
 
     now = datetime.now().strftime('%I:%M %p %Z on %A')
@@ -248,9 +248,9 @@ def run_planner():
         database.update_goal_thought_time(goal['id'])
 
         score = goal.get('score', 0)
-        log(f'Think goal={goal["id"]} type={goal_type} conf={confidence}% score={score:.1f}: {response[:100]}')
+        log(f'Think goal={goal["id"]} type={goal_type} conf={confidence}% score={score:.1f}: {response[:200]}')
         database.log_action('think',
-            f'goal={goal["id"]} type={goal_type} conf={confidence} score={score:.1f} response={response[:200]}',
+            f'goal={goal["id"]} type={goal_type} conf={confidence} score={score:.1f} response={response}',
             model='nexus', duration_sec=duration)
 
         try:
@@ -280,13 +280,13 @@ def run_planner():
                             f'[CONFIRM] Low confidence ({confidence}%): {tool_name}',
                             'send_notification',
                             {'title': f'Ghost: Confirm? ({confidence}% conf)',
-                             'message': f'Goal: {goal["description"][:80]}\nAction: {tool_name}\nParams: {json.dumps(tool_params)[:150]}',
+                             'message': f'Goal: {goal["description"]}\nAction: {tool_name}\nParams: {json.dumps(tool_params)[:500]}',
                              'priority': 'default'}
                         )
 
                     database.create_task(
                         goal['id'],
-                        f'{tool_name}: {json.dumps(tool_params)[:80]}',
+                        f'{tool_name}: {json.dumps(tool_params)[:200]}',
                         tool_name,
                         tool_params
                     )
@@ -333,13 +333,13 @@ def execute_tasks():
                        'chmod -R 777 /', 'shutdown', 'reboot', 'halt', 'poweroff',
                        'curl.*|.*sh', 'wget.*|.*sh']
             if any(b in cmd.lower() for b in blocked):
-                result = f'BLOCKED: {cmd[:50]}'
+                result = f'BLOCKED: {cmd[:100]}'
                 database.update_task(task['id'], 'failed', result)
-                notify('Ghost: Blocked', f'Refused: {cmd[:80]}', priority='high')
+                notify('Ghost: Blocked', f'Refused: {cmd[:200]}', priority='high')
             else:
                 r = subprocess.run(['bash', '-c', cmd],
                     capture_output=True, text=True, timeout=30)
-                output = (r.stdout + r.stderr).strip()[:300]
+                output = (r.stdout + r.stderr).strip()[:2000]
                 success = r.returncode == 0
                 status = 'completed' if success else 'failed'
                 database.update_task(task['id'], status, output)
@@ -347,7 +347,7 @@ def execute_tasks():
                 aor.reflect_on_action(task['id'], cmd, r.returncode, output)
 
                 if r.returncode != 0:
-                    notify('Ghost: Failed', f'$ {cmd[:60]}\n{output[:200]}', priority='low')
+                    notify('Ghost: Failed', f'$ {cmd}\n{output}', priority='low')
 
         elif tool == 'review_pr':
             repo = params.get('repo', '')
@@ -357,7 +357,7 @@ def execute_tasks():
                 result = do_review(repo, int(number))
                 success = True
                 database.update_task(task['id'], 'completed', result)
-                notify('Ghost: PR Reviewed', f'{repo}#{number}: {result[:200]}')
+                notify('Ghost: PR Reviewed', f'{repo}#{number}: {result}')
                 aor.reflect_on_action(task['id'], f'review_pr {repo}#{number}', 0, result)
             else:
                 database.update_task(task['id'], 'failed', 'Missing repo or number')
@@ -369,7 +369,7 @@ def execute_tasks():
                 success = 'error' not in result.lower()
                 database.update_task(task['id'], 'completed' if success else 'failed', result)
                 if success:
-                    notify('Ghost: PR Opened', result[:300])
+                    notify('Ghost: PR Opened', result)
             except ImportError:
                 database.update_task(task['id'], 'failed', 'code_commit actuator not installed')
             except Exception as e:
@@ -381,7 +381,7 @@ def execute_tasks():
                 result = research(params.get('query', ''))
                 success = bool(result)
                 database.update_task(task['id'], 'completed' if success else 'failed',
-                                   result[:500] if result else 'No results')
+                                   result[:2000] if result else 'No results')
             except ImportError:
                 database.update_task(task['id'], 'failed', 'research actuator not installed')
             except Exception as e:
@@ -396,7 +396,7 @@ def execute_tasks():
 
     except subprocess.TimeoutExpired:
         database.update_task(task['id'], 'failed', 'Timed out')
-        notify('Ghost: Timeout', f'Timed out: {params.get("command", "?")[:80]}', priority='low')
+        notify('Ghost: Timeout', f'Timed out: {params.get("command", "?")}', priority='low')
     except Exception as e:
         database.update_task(task['id'], 'failed', str(e)[:200])
 
@@ -491,7 +491,7 @@ def self_diagnose():
         diag_key = 'self-diag-' + '-'.join(sorted(set(i.split(':')[0].strip() for i in new_issues)))
         if diag_key not in LAST_NOTIFY or (time.time() - LAST_NOTIFY.get(diag_key, 0)) > 7200:
             pri = 'urgent' if has_critical else 'low'
-            notify('Ghost: Self-Diagnosis', report[:400], priority=pri)
+            notify('Ghost: Self-Diagnosis', report, priority=pri)
             LAST_NOTIFY[diag_key] = time.time()
     elif remediated:
         log(f'DIAG: {len(remediated)} auto-fixed, no new issues')
