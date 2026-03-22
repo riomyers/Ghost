@@ -20,7 +20,7 @@ CYCLE_INTERVAL = 60
 THINK_INTERVAL = 10
 THINK_INTERVAL_DEFAULT = 10
 THINK_INTERVAL_THROTTLED = 30
-DAILY_TOKEN_LIMIT = 100
+DAILY_CALL_LIMIT = 150
 NO_ACTION_COUNTS = {}  # goal_id -> consecutive no_action count
 NO_ACTION_SKIP_THRESHOLD = 3  # skip goal after 3 consecutive no_actions
 NO_ACTION_SKIP_CYCLES = 60  # skip for 60 cycles (~1 hour)
@@ -111,12 +111,14 @@ TOOL_SCHEMA = {
     "required": ["tool_name", "tool_params"]
 }
 
-def think_with_nexus(prompt, model="haiku", system_prompt=None, use_schema=False):
+def think_with_nexus(prompt, model="haiku", system_prompt=None, use_schema=False,
+                     priority="normal"):
     """Reason via Nexus AI Gateway."""
     try:
         result, used_model, provider = nexus_client.chat(
             prompt, model=model, system_prompt=system_prompt,
-            json_schema=TOOL_SCHEMA if use_schema else None, timeout=60)
+            json_schema=TOOL_SCHEMA if use_schema else None, timeout=60,
+            priority=priority)
         database.record_token_usage('nexus', 1)
         log(f'Nexus: model={used_model} provider={provider}')
         return result
@@ -218,10 +220,14 @@ def run_planner():
     if not goals:
         return
 
-    # Log token usage for monitoring (no hard block)
     hourly = database.get_hourly_token_usage('nexus')
     daily = database.get_daily_token_usage('nexus')
-    log(f'Budget: hourly={hourly} daily={daily} goals_selected={len(goals)}')
+    log(f'Budget: hourly={hourly} daily={daily}/{DAILY_CALL_LIMIT} goals_selected={len(goals)}')
+
+    # Hard block background thinking when over daily limit
+    if daily >= DAILY_CALL_LIMIT:
+        log(f'DAILY LIMIT HIT ({daily}/{DAILY_CALL_LIMIT}) — skipping think cycle', 'WARN')
+        return
 
     current_cycle = int(time.time() / CYCLE_INTERVAL)  # approximate cycle number
 
@@ -344,9 +350,9 @@ def execute_tasks():
                 status = 'completed' if success else 'failed'
                 database.update_task(task['id'], status, output)
 
-                aor.reflect_on_action(task['id'], cmd, r.returncode, output)
-
+                # Only reflect on failures — reflecting on success wastes API calls
                 if r.returncode != 0:
+                    aor.reflect_on_action(task['id'], cmd, r.returncode, output)
                     notify('Ghost: Failed', f'$ {cmd}\n{output}', priority='low')
 
         elif tool == 'review_pr':
@@ -446,11 +452,11 @@ def self_diagnose():
     # Check token usage — auto-throttle if too high
     global THINK_INTERVAL
     daily = database.get_daily_token_usage('nexus')
-    if daily > DAILY_TOKEN_LIMIT:
+    if daily > DAILY_CALL_LIMIT * 0.8:
         if THINK_INTERVAL < THINK_INTERVAL_THROTTLED:
             THINK_INTERVAL = THINK_INTERVAL_THROTTLED
             remediated.append(f"Throttled think interval: {THINK_INTERVAL_DEFAULT} → {THINK_INTERVAL_THROTTLED} cycles")
-        issues.append(f"High token usage: {daily}/{DAILY_TOKEN_LIMIT} — throttled to every {THINK_INTERVAL_THROTTLED} cycles")
+        issues.append(f"High API usage: {daily}/{DAILY_CALL_LIMIT} calls — throttled to every {THINK_INTERVAL_THROTTLED} cycles")
     elif THINK_INTERVAL > THINK_INTERVAL_DEFAULT:
         THINK_INTERVAL = THINK_INTERVAL_DEFAULT
         remediated.append(f"Restored think interval to {THINK_INTERVAL_DEFAULT} cycles")

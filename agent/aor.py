@@ -75,7 +75,8 @@ JSON only:
     lesson = ''
 
     try:
-        result, _, _ = nexus_client.chat(prompt, model='haiku', timeout=20)
+        result, _, _ = nexus_client.chat(prompt, model='haiku', timeout=20,
+                                         priority='low')
         database.record_token_usage('nexus', 1)
         start = result.find('{')
         end = result.rfind('}') + 1
@@ -160,7 +161,8 @@ Format:
 Keep it under 300 words. Be specific and actionable."""
 
     try:
-        sop_content, _, _ = nexus_client.chat(prompt, model='haiku', timeout=30)
+        sop_content, _, _ = nexus_client.chat(prompt, model='haiku', timeout=30,
+                                                priority='low')
         database.record_token_usage('nexus', 1)
 
         # Validate it looks like a reasonable SOP

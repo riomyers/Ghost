@@ -128,7 +128,8 @@ Analyze these log anomalies and determine if any require immediate action:
 
 Respond with 1-2 sentences: what's happening and what (if anything) to do about it."""
 
-            analysis, _, _ = nexus_client.chat(prompt, model='haiku', timeout=20)
+            analysis, _, _ = nexus_client.chat(prompt, model='haiku', timeout=20,
+                                                 priority='low')
             database.record_token_usage('nexus', 1)
             database.record_observation('logs',
                 f'Log analysis: {analysis}',

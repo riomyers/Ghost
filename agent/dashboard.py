@@ -534,7 +534,8 @@ def api_command():
 "{command}"
 Respond helpfully and concisely (under 200 words). Be direct."""
 
-        response, model, provider = nexus_client.chat(prompt, model='haiku', timeout=30)
+        response, model, provider = nexus_client.chat(prompt, model='haiku', timeout=30,
+                                                       priority='high')
         db_mod.record_token_usage('nexus', 1)
         db_mod.log_action('think', f'command_bar goal={goal_id}: {response}', model='nexus')
         return jsonify(response=response, goal_id=goal_id)
@@ -569,7 +570,8 @@ Be helpful, direct. You run on a Linux server with a brain daemon and dashboard.
 Rio's message: {message}
 Your reply:"""
 
-        response, _, _ = nexus_client.chat(prompt, model='haiku', timeout=30)
+        response, _, _ = nexus_client.chat(prompt, model='haiku', timeout=30,
+                                            priority='high')
         db_mod.record_token_usage('nexus', 1)
         db_mod.log_action('act', f'text_reply to={sender}: {response}', model='nexus')
         return jsonify(response=response)
@@ -604,7 +606,8 @@ Details: {details[:400]}
 Explain in 2-3 simple sentences: what you did, why, and what happened.
 No jargon. Like explaining to a friend."""
 
-        explanation, _, _ = nexus_client.chat(prompt, model='haiku', timeout=20)
+        explanation, _, _ = nexus_client.chat(prompt, model='haiku', timeout=20,
+                                                priority='high')
         db_mod.record_token_usage('nexus', 1)
         return jsonify(explanation=explanation)
     except Exception as e:
