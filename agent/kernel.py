@@ -201,7 +201,7 @@ Lessons:
 {sop_text}
 Available tools:
 - send_notification: Push notification. ONLY for failures or issues requiring attention. NEVER notify when healthy/normal. Params: {{"title": "...", "message": "..."}}
-- execute_bash: Run a shell command. Params: {{"command": "..."}}
+- execute_bash: Run a standard Linux shell command. ONLY use commands that exist on Ubuntu (systemctl, apt, curl, ping, df, free, uptime, journalctl, docker, git, etc). NEVER invent commands — if you are unsure a command exists, use no_action instead. Params: {{"command": "..."}}
 - review_pr: Review a GitHub PR. Params: {{"repo": "owner/name", "number": 123}}
 - propose_code_change: Open a PR. Params: {{"repo": "owner/name", "branch": "fix/name", "description": "..."}}
 - research_web: Web search. Params: {{"query": "..."}}
@@ -353,7 +353,10 @@ def execute_tasks():
                 # Only reflect on failures — reflecting on success wastes API calls
                 if r.returncode != 0:
                     aor.reflect_on_action(task['id'], cmd, r.returncode, output)
-                    notify('Ghost: Failed', f'$ {cmd}\n{output}', priority='low')
+                    # Don't notify on "command not found" (exit 127) — that's the AI
+                    # hallucinating commands, not a real system problem
+                    if r.returncode != 127 and 'command not found' not in output:
+                        notify('Ghost: Failed', f'$ {cmd}\n{output}', priority='low')
 
         elif tool == 'review_pr':
             repo = params.get('repo', '')
