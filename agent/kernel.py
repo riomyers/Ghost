@@ -350,12 +350,19 @@ def execute_tasks():
                 status = 'completed' if success else 'failed'
                 database.update_task(task['id'], status, output)
 
-                # Only reflect on failures — reflecting on success wastes API calls
+                # Only reflect on real failures — not search misses or hallucinations
                 if r.returncode != 0:
-                    aor.reflect_on_action(task['id'], cmd, r.returncode, output)
-                    # Don't notify on "command not found" (exit 127) — that's the AI
-                    # hallucinating commands, not a real system problem
-                    if r.returncode != 127 and 'command not found' not in output:
+                    # Exit 127 = command not found (AI hallucination)
+                    # Exit 1 with "no entries/matches" = search found nothing (success)
+                    benign_miss = (
+                        r.returncode == 127
+                        or 'command not found' in output
+                        or (r.returncode == 1 and any(p in output.lower() for p in
+                            ('no entries', 'no match', 'no lines', '0 results',
+                             'nothing to do', 'already the newest')))
+                    )
+                    if not benign_miss:
+                        aor.reflect_on_action(task['id'], cmd, r.returncode, output)
                         notify('Ghost: Failed', f'$ {cmd}\n{output}', priority='low')
 
         elif tool == 'review_pr':
