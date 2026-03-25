@@ -3,6 +3,7 @@
 import sys
 sys.path.insert(0, '/home/atom/pickle-agent/src')
 
+import os
 import subprocess
 import json
 from datetime import datetime
@@ -13,7 +14,11 @@ NTFY_TOPIC = 'https://ntfy.sh/ghost-pickle-rick'
 NTFY_PRIORITIES = {'min': '1', 'low': '2', 'default': '3', 'high': '4', 'urgent': '5'}
 
 
+NOTIFICATIONS_ENABLED = os.environ.get('GHOST_NOTIFICATIONS', '1') == '1'
+
 def notify(title, message, priority='default'):
+    if not NOTIFICATIONS_ENABLED:
+        return
     pri = NTFY_PRIORITIES.get(priority, '3')
     try:
         subprocess.run(

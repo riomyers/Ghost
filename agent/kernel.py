@@ -44,7 +44,12 @@ LAST_NOTIFY = {}
 # Use 'urgent' for critical issues only — warnings stay as quiet push notifications
 NTFY_PRIORITIES = {'min': '1', 'low': '2', 'default': '3', 'high': '4', 'urgent': '5'}
 
+NOTIFICATIONS_ENABLED = os.environ.get('GHOST_NOTIFICATIONS', '1') == '1'
+
 def notify(title, message, priority='default'):
+    if not NOTIFICATIONS_ENABLED:
+        log(f'NOTIFY MUTED [{priority}]: {title}')
+        return True
     import hashlib
     key = hashlib.md5((title + message[:100]).encode()).hexdigest()
     now = time.time()
