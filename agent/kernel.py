@@ -517,6 +517,10 @@ def startup():
     scores = database.get_all_confidence()
     score_text = ', '.join([f'{s["goal_type"]}={s["confidence"]}%' for s in scores]) if scores else 'none yet'
     ollama_ok = ollama_client.is_available()
+    if ollama_ok:
+        log('Warming up Ollama model...')
+        warmed = ollama_client.warmup()
+        log(f'Ollama warmup: {"OK" if warmed else "FAILED"}')
     notify('Ghost Online',
            f'Kernel v5 (local-first). {len(goals)} goals. Ollama: {"UP" if ollama_ok else "DOWN"}. Confidence: {score_text}',
            priority='low')

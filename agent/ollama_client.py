@@ -49,6 +49,7 @@ def chat(prompt, model=None, system_prompt=None, json_schema=None,
         "model": use_model,
         "messages": messages,
         "stream": False,
+        "keep_alive": "15m",
         "options": {"temperature": 0.3, "num_predict": 500},
     }
     if json_schema:
@@ -76,5 +77,17 @@ def is_available():
         req = urllib.request.Request(f"{OLLAMA_URL}/api/tags")
         with urllib.request.urlopen(req, timeout=5) as resp:
             return resp.status == 200
+    except Exception:
+        return False
+
+
+def warmup():
+    """Load model into memory so first real call doesn't timeout.
+
+    Cold starts on CPU can take 30-60s. Call this at startup.
+    """
+    try:
+        chat("respond with only: ok", timeout=120)
+        return True
     except Exception:
         return False
