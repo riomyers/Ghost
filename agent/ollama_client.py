@@ -13,7 +13,7 @@ import urllib.request
 
 MAC_HOST = os.environ.get("GHOST_MAC_HOST", "192.168.1.6")
 OLLAMA_URL = os.environ.get("OLLAMA_URL", f"http://{MAC_HOST}:11434")
-DEFAULT_MODEL = os.environ.get("GHOST_OLLAMA_MODEL", "gemma3:12b")
+DEFAULT_MODEL = os.environ.get("GHOST_OLLAMA_MODEL", "gemma3:4b")
 
 
 def chat(prompt, model=None, system_prompt=None, json_schema=None,
@@ -49,7 +49,7 @@ def chat(prompt, model=None, system_prompt=None, json_schema=None,
         "model": use_model,
         "messages": messages,
         "stream": False,
-        "keep_alive": "15m",
+        "keep_alive": -1,
         "options": {"temperature": 0.3, "num_predict": 500},
     }
     if json_schema:
