@@ -11,7 +11,7 @@ import json
 import sqlite3
 from pathlib import Path
 import database
-import nexus_client
+import ollama_client
 
 DB_PATH = Path('/home/atom/pickle-agent/data/agent_state.db')
 SOP_DIR = Path('/home/atom/pickle-agent/sops')
@@ -61,7 +61,7 @@ def _categorize_command(command):
 
 
 def reflect_on_action(task_id, command, exit_code, output):
-    """Reflect via Nexus (not Claude CLI) and check for SOP trigger."""
+    """Reflect on a completed action via Ollama and check for SOP trigger."""
     prompt = f"""You executed a command as an autonomous agent. Reflect briefly.
 
 COMMAND: {command[:200]}
@@ -75,9 +75,8 @@ JSON only:
     lesson = ''
 
     try:
-        result, _, _ = nexus_client.chat(prompt, model='haiku', timeout=20,
-                                         priority='low')
-        database.record_token_usage('nexus', 1)
+        result, _, _ = ollama_client.chat(prompt, timeout=30)
+        database.record_token_usage('ollama', 1)
         start = result.find('{')
         end = result.rfind('}') + 1
         if start >= 0 and end > start:
@@ -161,9 +160,8 @@ Format:
 Keep it under 300 words. Be specific and actionable."""
 
     try:
-        sop_content, _, _ = nexus_client.chat(prompt, model='haiku', timeout=30,
-                                                priority='low')
-        database.record_token_usage('nexus', 1)
+        sop_content, _, _ = ollama_client.chat(prompt, timeout=45)
+        database.record_token_usage('ollama', 1)
 
         # Validate it looks like a reasonable SOP
         if len(sop_content) > 50 and '#' in sop_content:

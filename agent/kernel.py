@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Ghost Brain Kernel v4 — smart goal routing, confidence gating, no hard rate limit."""
+"""Ghost Brain Kernel v5 — local-first brain, Ollama for background, Nexus for user-facing."""
 
 import sys
 sys.path.insert(0, '/home/atom/pickle-agent/src')
@@ -14,13 +14,10 @@ from pathlib import Path
 import database
 import planner
 import aor
-import nexus_client
+import ollama_client
 
 CYCLE_INTERVAL = 60
 THINK_INTERVAL = 10
-THINK_INTERVAL_DEFAULT = 10
-THINK_INTERVAL_THROTTLED = 30
-DAILY_CALL_LIMIT = 150
 NO_ACTION_COUNTS = {}  # goal_id -> consecutive no_action count
 NO_ACTION_SKIP_THRESHOLD = 3  # skip goal after 3 consecutive no_actions
 NO_ACTION_SKIP_CYCLES = 60  # skip for 60 cycles (~1 hour)
@@ -111,19 +108,18 @@ TOOL_SCHEMA = {
     "required": ["tool_name", "tool_params"]
 }
 
-def think_with_nexus(prompt, model="haiku", system_prompt=None, use_schema=False,
-                     priority="normal"):
-    """Reason via Nexus AI Gateway."""
+def think_with_ollama(prompt, system_prompt=None, use_schema=False):
+    """Reason via local Ollama — free, unlimited, always-on."""
     try:
-        result, used_model, provider = nexus_client.chat(
-            prompt, model=model, system_prompt=system_prompt,
-            json_schema=TOOL_SCHEMA if use_schema else None, timeout=60,
-            priority=priority)
-        database.record_token_usage('nexus', 1)
-        log(f'Nexus: model={used_model} provider={provider}')
+        result, used_model, provider = ollama_client.chat(
+            prompt, system_prompt=system_prompt,
+            json_schema=TOOL_SCHEMA if use_schema else None, timeout=60)
+        database.record_token_usage('ollama', 1)
+        log(f'Ollama: model={used_model}')
         return result
     except Exception as e:
-        return f'nexus error: {e}'
+        log(f'Ollama error: {e}', 'WARN')
+        return f'ollama error: {e}'
 
 
 # --- Goal Classification ---
@@ -220,14 +216,13 @@ def run_planner():
     if not goals:
         return
 
-    hourly = database.get_hourly_token_usage('nexus')
-    daily = database.get_daily_token_usage('nexus')
-    log(f'Budget: hourly={hourly} daily={daily}/{DAILY_CALL_LIMIT} goals_selected={len(goals)}')
-
-    # Hard block background thinking when over daily limit
-    if daily >= DAILY_CALL_LIMIT:
-        log(f'DAILY LIMIT HIT ({daily}/{DAILY_CALL_LIMIT}) — skipping think cycle', 'WARN')
+    # Check Ollama availability before burning through goals
+    if not ollama_client.is_available():
+        log('Ollama unreachable — skipping think cycle', 'WARN')
         return
+
+    daily = database.get_daily_token_usage('ollama')
+    log(f'Think cycle: goals_selected={len(goals)} ollama_calls_today={daily}')
 
     current_cycle = int(time.time() / CYCLE_INTERVAL)  # approximate cycle number
 
@@ -247,7 +242,7 @@ def run_planner():
         system, user_prompt = build_prompt(goal, observations, confidence)
 
         start = time.time()
-        response = think_with_nexus(user_prompt, system_prompt=system, use_schema=True)
+        response = think_with_ollama(user_prompt, system_prompt=system, use_schema=True)
         duration = round(time.time() - start, 1)
 
         # Mark this goal as recently thought about
@@ -257,7 +252,7 @@ def run_planner():
         log(f'Think goal={goal["id"]} type={goal_type} conf={confidence}% score={score:.1f}: {response[:200]}')
         database.log_action('think',
             f'goal={goal["id"]} type={goal_type} conf={confidence} score={score:.1f} response={response}',
-            model='nexus', duration_sec=duration)
+            model='ollama', duration_sec=duration)
 
         try:
             start_idx = response.find('{')
@@ -426,15 +421,19 @@ def self_diagnose():
     """Self-diagnosis — Ghost checks its own health every 10 cycles."""
     issues = []
 
-    # Check Nexus connectivity via recent action log (don't burn an API call)
+    # Check Ollama connectivity
+    if not ollama_client.is_available():
+        issues.append("Ollama unreachable — background thinking disabled")
+
+    # Check for think cycle stalls
     db = database.get_db()
     recent_thinks = db.execute('''SELECT details FROM action_log
         WHERE phase = 'think' AND created_at > datetime('now', '-15 minutes')
         ORDER BY id DESC LIMIT 3''').fetchall()
     db.close()
-    nexus_errors = sum(1 for t in recent_thinks if 'nexus error' in (t['details'] or '').lower())
-    if nexus_errors >= 2:
-        issues.append(f"Nexus failing: {nexus_errors}/3 recent thinks had errors")
+    ollama_errors = sum(1 for t in recent_thinks if 'ollama error' in (t['details'] or '').lower())
+    if ollama_errors >= 2:
+        issues.append(f"Ollama failing: {ollama_errors}/3 recent thinks had errors")
     elif not recent_thinks:
         issues.append("No think cycles in last 15 min — kernel may be stalled")
 
@@ -459,18 +458,6 @@ def self_diagnose():
     # Auto-remediate what we can
     remediated = []
 
-    # Check token usage — auto-throttle if too high
-    global THINK_INTERVAL
-    daily = database.get_daily_token_usage('nexus')
-    if daily > DAILY_CALL_LIMIT * 0.8:
-        if THINK_INTERVAL < THINK_INTERVAL_THROTTLED:
-            THINK_INTERVAL = THINK_INTERVAL_THROTTLED
-            remediated.append(f"Throttled think interval: {THINK_INTERVAL_DEFAULT} → {THINK_INTERVAL_THROTTLED} cycles")
-        issues.append(f"High API usage: {daily}/{DAILY_CALL_LIMIT} calls — throttled to every {THINK_INTERVAL_THROTTLED} cycles")
-    elif THINK_INTERVAL > THINK_INTERVAL_DEFAULT:
-        THINK_INTERVAL = THINK_INTERVAL_DEFAULT
-        remediated.append(f"Restored think interval to {THINK_INTERVAL_DEFAULT} cycles")
-
     if stale_sensors:
         for name in stale_sensors:
             SENSOR_COOLDOWN.pop(name, None)
@@ -494,7 +481,7 @@ def self_diagnose():
     # Only notify on genuinely new issues — and only ONCE per issue
     # Critical issues (nexus down, kernel stalled) get urgent priority (triggers texts)
     # Warnings (high failure rate, cooldowns, token throttle) stay low priority
-    CRITICAL_KEYWORDS = ('nexus failing', 'kernel may be stalled')
+    CRITICAL_KEYWORDS = ('ollama unreachable', 'ollama failing', 'kernel may be stalled')
     if new_issues:
         report = "SELF-DIAGNOSIS:\n" + "\n".join(f"- {i}" for i in new_issues)
         if remediated:
@@ -516,7 +503,7 @@ def self_diagnose():
 
 
 def startup():
-    log('Ghost Brain Kernel v4 starting — smart routing, confidence gating, self-diagnosis')
+    log('Ghost Brain Kernel v5 starting — local-first (Ollama), confidence gating, self-diagnosis')
     database.init_db()
     aor.init_aor()
 
@@ -529,8 +516,9 @@ def startup():
     goals = database.get_active_goals()
     scores = database.get_all_confidence()
     score_text = ', '.join([f'{s["goal_type"]}={s["confidence"]}%' for s in scores]) if scores else 'none yet'
+    ollama_ok = ollama_client.is_available()
     notify('Ghost Online',
-           f'Kernel v4. {len(goals)} goals. Smart routing (max {MAX_GOALS_PER_CYCLE}/cycle). Confidence: {score_text}',
+           f'Kernel v5 (local-first). {len(goals)} goals. Ollama: {"UP" if ollama_ok else "DOWN"}. Confidence: {score_text}',
            priority='low')
 
 
@@ -552,9 +540,8 @@ def main():
                 database.prune_old_actions(days=14)
             if cycle % 5 == 0:
                 goals = database.get_active_goals()
-                hourly = database.get_hourly_token_usage('nexus')
-                daily = database.get_daily_token_usage('nexus')
-                log(f'Cycle {cycle}: {len(goals)} goals, nexus_calls_1h={hourly} nexus_calls_today={daily}')
+                daily = database.get_daily_token_usage('ollama')
+                log(f'Cycle {cycle}: {len(goals)} goals, ollama_calls_today={daily}')
             time.sleep(CYCLE_INTERVAL)
         except KeyboardInterrupt:
             log('Kernel stopped.')

@@ -2,7 +2,7 @@
 """Web Research Actuator — search the web and summarize findings.
 
 Uses DuckDuckGo HTML (no API key, zero cost) for search,
-urllib for fetching pages, Nexus for summarization.
+urllib for fetching pages, Ollama for summarization.
 """
 import sys
 sys.path.insert(0, '/home/atom/pickle-agent/src')
@@ -12,7 +12,7 @@ import urllib.request
 import urllib.parse
 import re
 from html.parser import HTMLParser
-import nexus_client
+import ollama_client
 import database
 
 
@@ -132,11 +132,11 @@ Provide a concise summary (3-5 bullet points) of the key findings. Include which
 Format: bullet points, no headers, cite URLs inline."""
 
     try:
-        summary, model, provider = nexus_client.chat(prompt, model='haiku', timeout=45)
-        database.record_token_usage('nexus', 1)
+        summary, model, provider = ollama_client.chat(prompt, timeout=60)
+        database.record_token_usage('ollama', 1)
     except Exception as e:
         # Fallback: return raw snippets
-        summary = f'Nexus unavailable. Raw results for "{query}":\n'
+        summary = f'Summarization unavailable. Raw results for "{query}":\n'
         for s in sources:
             summary += f'- {s["title"]}: {s["snippet"]}\n  {s["url"]}\n'
 

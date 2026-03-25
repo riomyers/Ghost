@@ -7,7 +7,7 @@ import subprocess
 import json
 from datetime import datetime
 import database
-import nexus_client
+import ollama_client
 
 NTFY_TOPIC = 'https://ntfy.sh/ghost-pickle-rick'
 NTFY_PRIORITIES = {'min': '1', 'low': '2', 'default': '3', 'high': '4', 'urgent': '5'}
@@ -80,13 +80,21 @@ def end_of_day_digest():
     """Run at 10pm CDT — summarize the day's work and send to Rio."""
     database.init_db()
 
-    # Gather day's data
-    actions = database.get_recent_actions(limit=50)
-    today = datetime.now().strftime('%Y-%m-%d')
-    today_actions = [a for a in actions if a.get('created_at', '').startswith(today)]
+    # Gather day's data — actions are stored in UTC, scheduler runs in CDT
+    # Use UTC date range for "today" in CDT: 5am UTC (midnight CDT) to now
+    from datetime import timezone, timedelta
+    cdt = timezone(timedelta(hours=-5))
+    now_cdt = datetime.now(cdt)
+    today_start_utc = now_cdt.replace(hour=0, minute=0, second=0).astimezone(timezone.utc).strftime('%Y-%m-%dT%H:%M:%S')
+    today_end_utc = now_cdt.astimezone(timezone.utc).strftime('%Y-%m-%dT%H:%M:%S')
 
-    observations = database.get_recent_observations(limit=50)
-    today_obs = [o for o in observations if o.get('created_at', '').startswith(today)]
+    actions = database.get_recent_actions(limit=100)
+    today_actions = [a for a in actions
+                     if today_start_utc <= a.get('created_at', '') <= today_end_utc]
+
+    observations = database.get_recent_observations(limit=100)
+    today_obs = [o for o in observations
+                 if today_start_utc <= o.get('created_at', '') <= today_end_utc]
 
     # Count by type
     thinks = len([a for a in today_actions if a['phase'] == 'think'])
@@ -102,6 +110,12 @@ def end_of_day_digest():
     scores = database.get_all_confidence()
     conf_text = ', '.join([f'{s["goal_type"]}: {s["confidence"]}%' for s in scores]) if scores else 'no data yet'
 
+    # Build notable actions list
+    notable = []
+    for a in today_actions[:20]:
+        if a['phase'] in ('think', 'act') and 'no_action' not in a.get('details', ''):
+            notable.append(f"- [{a['phase']}] {a['details'][:300]}")
+
     # Build summary prompt for Nexus
     summary_data = f"""Summarize Ghost's day in 3-5 bullet points for Rio.
 
@@ -113,15 +127,26 @@ Today's stats:
 
 Notable actions today:
 """
-    for a in today_actions[:10]:
-        if a['phase'] in ('think', 'act') and 'no_action' not in a.get('details', ''):
-            summary_data += f"- [{a['phase']}] {a['details'][:300]}\n"
+    if notable:
+        summary_data += '\n'.join(notable[:10]) + '\n'
+    else:
+        summary_data += '- No significant actions logged today (quiet day or sensor-only activity)\n'
 
     summary_data += "\nBe concise. Focus on what Ghost actually DID, not what it thought about."
 
+    eod_system = (
+        "You are Ghost, an autonomous Linux agent that monitors systems, "
+        "thinks about goals, and takes actions. You're summarizing YOUR OWN "
+        "activity for your owner Rio. Write in first person. Be brief. "
+        "IMPORTANT: Plain text only — no markdown, no bold, no headers, no "
+        "bullet symbols. Write like a human texting a quick update. Casual, "
+        "warm, short sentences."
+    )
+
     try:
-        summary, _, _ = nexus_client.chat(summary_data, model='haiku', timeout=30)
-        database.record_token_usage('nexus', 1)
+        summary, _, _ = ollama_client.chat(
+            summary_data, system_prompt=eod_system, timeout=45)
+        database.record_token_usage('ollama', 1)
     except Exception:
         summary = f'Ghost EOD: {thinks} thoughts, {acts} actions, {criticals} critical alerts, {daily_tokens} API calls.'
 

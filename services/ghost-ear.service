@@ -5,6 +5,7 @@ After=network.target sound.target
 [Service]
 Type=forking
 User=atom
+EnvironmentFile=-/home/atom/ghost/.env
 ExecStart=/home/atom/.local/bin/ghost-ear start
 ExecStop=/home/atom/.local/bin/ghost-ear stop
 PIDFile=/home/atom/ghost/.ear.pid

@@ -7,7 +7,7 @@ import re
 from datetime import datetime
 from pathlib import Path
 import database
-import nexus_client
+import ollama_client
 
 LOG_DIR = Path('/home/atom/pickle-agent/logs')
 SYSLOG = Path('/var/log/syslog')
@@ -128,14 +128,13 @@ Analyze these log anomalies and determine if any require immediate action:
 
 Respond with 1-2 sentences: what's happening and what (if anything) to do about it."""
 
-            analysis, _, _ = nexus_client.chat(prompt, model='haiku', timeout=20,
-                                                 priority='low')
-            database.record_token_usage('nexus', 1)
+            analysis, _, _ = ollama_client.chat(prompt, timeout=30)
+            database.record_token_usage('ollama', 1)
             database.record_observation('logs',
                 f'Log analysis: {analysis}',
                 'critical' if criticals else 'warning')
-        except Exception:
-            pass
+        except Exception as e:
+            database.record_observation('logs', f'Log analysis failed: {e}', 'warning')
 
     if not unique:
         database.record_observation('logs', 'Log scan: all clear', 'debug')

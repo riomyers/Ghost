@@ -92,7 +92,7 @@ def daemon_loop():
     signal.signal(signal.SIGINT, cleanup)
 
     log("Ear daemon started — listening for wake words")
-    convo = []
+    log(f"Brain: Nexus={brain.NEXUS_URL} model={brain.NEXUS_MODEL} key={'set' if brain.NEXUS_KEY else 'MISSING'}")
 
     while True:
         try:
@@ -106,11 +106,9 @@ def daemon_loop():
                 message = strip_wake_word(text)
                 if message:
                     log(f"Wake word + command: {message}")
-                    response = brain.think(message, conversation=convo)
-                    convo.append({"role": "user", "content": message})
-                    convo.append({"role": "assistant", "content": response})
-                    convo = convo[-20:]
-                    log(f"Response: {response}")
+                    response = brain.think(message)
+                    source = brain.BRAIN_STATE["source"]
+                    log(f"[{source}] Response: {response}")
                     voice.say(response)
                 else:
                     log("Wake word detected — waiting for command...")
@@ -120,11 +118,9 @@ def daemon_loop():
                     command = ear.listen(timeout=15, silence_sec=1.5)
                     if command:
                         log(f"Command: {command}")
-                        response = brain.think(command, conversation=convo)
-                        convo.append({"role": "user", "content": command})
-                        convo.append({"role": "assistant", "content": response})
-                        convo = convo[-20:]
-                        log(f"Response: {response}")
+                        response = brain.think(command)
+                        source = brain.BRAIN_STATE["source"]
+                        log(f"[{source}] Response: {response}")
                         voice.say(response)
                     else:
                         log("No command after wake word")

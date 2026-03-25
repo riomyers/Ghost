@@ -7,6 +7,7 @@ __pycache__/
 *.db-shm
 .env
 .env.*
+!.env.example
 *.key
 *.log
 venv/
@@ -15,3 +16,6 @@ node_modules/
 dist/
 *.bak
 .DS_Store
+
+# Sigil cache
+.sigil-cache.json
