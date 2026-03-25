@@ -45,12 +45,16 @@ def chat(prompt, model=None, system_prompt=None, json_schema=None,
         messages.append({"role": "system", "content": sys_text})
     messages.append({"role": "user", "content": prompt})
 
-    payload = json.dumps({
+    body = {
         "model": use_model,
         "messages": messages,
         "stream": False,
         "options": {"temperature": 0.3, "num_predict": 500},
-    }).encode()
+    }
+    if json_schema:
+        body["format"] = "json"
+
+    payload = json.dumps(body).encode()
 
     req = urllib.request.Request(
         f"{OLLAMA_URL}/api/chat",
