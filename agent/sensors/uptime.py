@@ -11,7 +11,7 @@ import database
 CONFIG_PATH = Path('/home/atom/pickle-agent/config.json')
 
 DEFAULT_SERVICES = [
-    {'name': 'ghost-dashboard', 'url': 'http://localhost:8080', 'expected_status': 200},
+    {'name': 'ghost-dashboard', 'url': 'http://localhost:8180', 'expected_status': 200},
 ]
 
 def sense():

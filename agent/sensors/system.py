@@ -31,7 +31,7 @@ def sense():
         temp = 0
 
     # Services
-    services = ['pickle-agent', 'ghost-worker', 'ghost-tunnel', 'pickle-dashboard', 'ollama']
+    services = ['ghost-kernel', 'ghost-scheduler', 'ghost-dashboard', 'ollama']
     down = []
     for svc in services:
         try:

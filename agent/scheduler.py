@@ -49,21 +49,20 @@ def hourly_health_check():
 
 
 def check_deployed_services():
-    """Run every 30 min — check if ghost.riomyers.com is up."""
+    """Run every 30 min — check if ghost dashboard is up."""
     try:
         r = subprocess.run(
             ['curl', '-s', '-o', '/dev/null', '-w', '%{http_code}', '--max-time', '10',
-             'http://localhost:8080'],
+             'http://localhost:8180'],
             capture_output=True, text=True, timeout=15
         )
         code = r.stdout.strip()
         if code != '200':
-            notify('Ghost: Dashboard Down', f'ghost.riomyers.com returned {code}', priority='high')
-            subprocess.run(['sudo', 'systemctl', 'restart', 'pickle-dashboard'], timeout=10)
-            subprocess.run(['sudo', 'systemctl', 'restart', 'ghost-tunnel'], timeout=10)
-            notify('Ghost: Auto-Recovery', 'Restarted dashboard and tunnel', priority='default')
-    except:
-        notify('Ghost: Dashboard Unreachable', 'Could not reach ghost.riomyers.com', priority='urgent')
+            notify('Ghost: Dashboard Down', f'Dashboard returned {code}', priority='high')
+            subprocess.run(['sudo', 'systemctl', 'restart', 'ghost-dashboard'], timeout=10)
+            notify('Ghost: Auto-Recovery', 'Restarted ghost-dashboard', priority='default')
+    except Exception as e:
+        notify('Ghost: Dashboard Unreachable', f'Could not reach dashboard: {e}', priority='high')
 
 
 def weekly_vuln_scan():

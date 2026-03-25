@@ -11,7 +11,7 @@ import ollama_client
 
 LOG_DIR = Path('/home/atom/pickle-agent/logs')
 SYSLOG = Path('/var/log/syslog')
-JOURNAL_UNITS = ['pickle-agent', 'pickle-dashboard', 'ghost-scheduler', 'ghost-tunnel', 'ollama']
+JOURNAL_UNITS = ['ghost-kernel', 'ghost-scheduler', 'ghost-dashboard', 'ollama']
 
 # Known patterns that are ALWAYS suspicious
 CRITICAL_PATTERNS = [
