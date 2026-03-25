@@ -113,7 +113,7 @@ def think_with_ollama(prompt, system_prompt=None, use_schema=False):
     try:
         result, used_model, provider = ollama_client.chat(
             prompt, system_prompt=system_prompt,
-            json_schema=TOOL_SCHEMA if use_schema else None, timeout=60)
+            json_schema=TOOL_SCHEMA if use_schema else None, timeout=180)
         database.record_token_usage('ollama', 1)
         log(f'Ollama: model={used_model}')
         return result
