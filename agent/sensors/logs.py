@@ -13,6 +13,17 @@ LOG_DIR = Path('/home/atom/pickle-agent/logs')
 SYSLOG = Path('/var/log/syslog')
 JOURNAL_UNITS = ['ghost-kernel', 'ghost-scheduler', 'ghost-dashboard', 'ollama']
 
+# Lines from Ghost's own operational logs — never flag these
+GHOST_OWN_LOG_PATTERNS = re.compile(
+    r'ollama_calls_today=|Think cycle:|DIAG:|Cycle \d+:|'
+    r'Ollama: model=|NOTIFY \[|NOTIFY MUTED|NOTIFY SUPPRESSED|'
+    r'Sensors complete|goals_selected=|auto-fixed|all clear|'
+    r'Ollama warmup:|Ghost Brain Kernel|Think goal=|'
+    r'ACT:|Planned:|LOW CONFIDENCE|Parse failed:|'
+    r'Sensor .* timed out|Log scan: all clear|Log analysis:',
+    re.IGNORECASE
+)
+
 # Known patterns that are ALWAYS suspicious
 CRITICAL_PATTERNS = [
     (r'OOM|Out of memory|oom-killer', 'critical', 'OOM kill detected'),
@@ -21,12 +32,14 @@ CRITICAL_PATTERNS = [
     (r'FATAL|panic|PANIC', 'critical', 'Fatal error'),
 ]
 
+# Context-aware warning patterns — require error indicators at meaningful positions,
+# not just the word "error" appearing anywhere in a log line
 WARNING_PATTERNS = [
-    (r'error|ERROR|Error', 'warning', 'Error in logs'),
-    (r'timeout|Timeout|TIMEOUT', 'warning', 'Timeout detected'),
-    (r'refused|REFUSED|connection refused', 'warning', 'Connection refused'),
-    (r'permission denied|Permission denied', 'warning', 'Permission denied'),
-    (r'killed|KILLED', 'warning', 'Process killed'),
+    (r'(?:^|\] )\[?ERROR\]?', 'warning', 'Error in logs'),
+    (r'(?:connection |connect )?(timed? ?out|ETIMEDOUT)', 'warning', 'Timeout detected'),
+    (r'(?:connection |connect )?refused|ECONNREFUSED', 'warning', 'Connection refused'),
+    (r'[Pp]ermission denied|EACCES', 'warning', 'Permission denied'),
+    (r'(?:process |task )?(?:killed|SIGKILL|exit code 137)', 'warning', 'Process killed'),
 ]
 
 
@@ -60,21 +73,22 @@ def _check_journal(unit, lines=30):
 
 
 def _pattern_scan(text, source):
-    """Scan text for known suspicious patterns."""
+    """Scan text for known suspicious patterns, excluding Ghost's own operational output."""
     findings = []
+    all_patterns = CRITICAL_PATTERNS + WARNING_PATTERNS
 
-    for pattern, severity, label in CRITICAL_PATTERNS + WARNING_PATTERNS:
-        matches = re.findall(pattern, text, re.IGNORECASE)
-        if matches:
-            # Get the line containing the match for context
-            for line in text.splitlines():
-                if re.search(pattern, line, re.IGNORECASE):
-                    findings.append({
-                        'severity': severity,
-                        'source': source,
-                        'message': f'{label}: {line.strip()[:500]}',
-                    })
-                    break  # One finding per pattern per source
+    for line in text.splitlines():
+        stripped = line.strip()
+        if not stripped or GHOST_OWN_LOG_PATTERNS.search(stripped):
+            continue
+        for pattern, severity, label in all_patterns:
+            if re.search(pattern, stripped, re.IGNORECASE):
+                findings.append({
+                    'severity': severity,
+                    'source': source,
+                    'message': f'{label}: {stripped[:500]}',
+                })
+                break  # First matching pattern wins for this line
 
     return findings
 

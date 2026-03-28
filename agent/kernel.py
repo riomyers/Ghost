@@ -18,6 +18,10 @@ import ollama_client
 
 CYCLE_INTERVAL = 60
 THINK_INTERVAL = 10
+THINK_INTERVAL_DEFAULT = 10
+THINK_INTERVAL_THROTTLED = 30
+OLLAMA_DAILY_LIMIT = int(os.environ.get('OLLAMA_DAILY_LIMIT', '200'))
+_throttled = False  # True when daily usage exceeds budget
 NO_ACTION_COUNTS = {}  # goal_id -> consecutive no_action count
 NO_ACTION_SKIP_THRESHOLD = 3  # skip goal after 3 consecutive no_actions
 NO_ACTION_SKIP_CYCLES = 60  # skip for 60 cycles (~1 hour)
@@ -106,7 +110,7 @@ TOOL_SCHEMA = {
         "tool_name": {
             "type": "string",
             "enum": ["send_notification", "execute_bash", "review_pr",
-                     "propose_code_change", "research_web", "no_action"]
+                     "propose_code_change", "research_web", "adjust_cycle", "no_action"]
         },
         "tool_params": {"type": "object"}
     },
@@ -206,6 +210,7 @@ Available tools:
 - review_pr: Review a GitHub PR. Params: {{"repo": "owner/name", "number": 123}}
 - propose_code_change: Open a PR. Params: {{"repo": "owner/name", "branch": "fix/name", "description": "..."}}
 - research_web: Web search. Params: {{"query": "..."}}
+- adjust_cycle: Change think cycle interval. Use when system is under heavy load or usage is high. Params: {{"interval": 5-60, "reason": "..."}}
 - no_action: Nothing needed right now. Params: {{}}
 
 Return JSON: {{"tool_name": "...", "tool_params": {{...}}}}"""
@@ -217,6 +222,8 @@ Return JSON: {{"tool_name": "...", "tool_params": {{...}}}}"""
 
 def run_planner():
     """Think about top-priority goals only — max {MAX_GOALS_PER_CYCLE} per cycle."""
+    global THINK_INTERVAL, _throttled
+
     goals = database.get_priority_goals(limit=MAX_GOALS_PER_CYCLE)
     if not goals:
         return
@@ -227,7 +234,19 @@ def run_planner():
         return
 
     daily = database.get_daily_token_usage('ollama')
-    log(f'Think cycle: goals_selected={len(goals)} ollama_calls_today={daily}')
+
+    # Budget enforcement: auto-throttle when over daily limit
+    if daily >= OLLAMA_DAILY_LIMIT and not _throttled:
+        THINK_INTERVAL = THINK_INTERVAL_THROTTLED
+        _throttled = True
+        log(f'BUDGET: {daily}/{OLLAMA_DAILY_LIMIT} calls — throttling think interval to {THINK_INTERVAL_THROTTLED} cycles', 'WARN')
+        database.record_observation('budget', f'Daily usage ({daily}) hit limit ({OLLAMA_DAILY_LIMIT}) — auto-throttled', 'warning')
+    elif daily < OLLAMA_DAILY_LIMIT and _throttled:
+        THINK_INTERVAL = THINK_INTERVAL_DEFAULT
+        _throttled = False
+        log(f'BUDGET: {daily}/{OLLAMA_DAILY_LIMIT} calls — throttle lifted, resuming normal interval')
+
+    log(f'Think cycle: goals_selected={len(goals)} ollama_calls_today={daily}/{OLLAMA_DAILY_LIMIT}')
 
     current_cycle = int(time.time() / CYCLE_INTERVAL)  # approximate cycle number
 
@@ -304,6 +323,7 @@ def run_planner():
 # --- Task Execution ---
 
 def execute_tasks():
+    global THINK_INTERVAL
     task = database.get_next_task()
     if not task:
         return
@@ -403,6 +423,16 @@ def execute_tasks():
             except Exception as e:
                 database.update_task(task['id'], 'failed', str(e)[:200])
 
+        elif tool == 'adjust_cycle':
+            new_interval = params.get('interval', THINK_INTERVAL_DEFAULT)
+            reason = params.get('reason', 'no reason given')
+            new_interval = max(5, min(60, int(new_interval)))
+            THINK_INTERVAL = new_interval
+            result = f'Think interval set to {new_interval} cycles ({reason})'
+            log(f'ADJUST_CYCLE: {result}')
+            database.update_task(task['id'], 'completed', result)
+            success = True
+
         elif tool == 'no_action':
             database.update_task(task['id'], 'skipped', 'No action needed')
             success = True
@@ -447,7 +477,7 @@ def self_diagnose():
     if stale_sensors:
         issues.append(f"Sensors in cooldown: {', '.join(stale_sensors)}")
 
-    # Check task failure rate (last 20 tasks)
+    # Check task failure rate (last hour)
     db = database.get_db()
     recent = db.execute('''SELECT status, COUNT(*) as cnt FROM tasks
                           WHERE completed_at > datetime('now', '-1 hour')
@@ -459,6 +489,14 @@ def self_diagnose():
     total = failed + completed
     if total > 0 and failed / total > 0.5:
         issues.append(f"High failure rate: {failed}/{total} tasks failed in last hour")
+
+    # Check usage budget — real numbers, not hallucinations
+    daily_usage = database.get_daily_token_usage('ollama')
+    usage_pct = round(daily_usage / OLLAMA_DAILY_LIMIT * 100) if OLLAMA_DAILY_LIMIT > 0 else 0
+    if daily_usage >= OLLAMA_DAILY_LIMIT:
+        issues.append(f"Usage over budget: {daily_usage}/{OLLAMA_DAILY_LIMIT} calls ({usage_pct}%) — throttled")
+    elif usage_pct >= 80:
+        issues.append(f"Usage approaching budget: {daily_usage}/{OLLAMA_DAILY_LIMIT} calls ({usage_pct}%)")
 
     # Auto-remediate what we can
     remediated = []
@@ -484,8 +522,8 @@ def self_diagnose():
             DIAG_SUPPRESSED[key] = now + 3600
 
     # Only notify on genuinely new issues — and only ONCE per issue
-    # Critical issues (nexus down, kernel stalled) get urgent priority (triggers texts)
-    # Warnings (high failure rate, cooldowns, token throttle) stay low priority
+    # Critical issues (ollama down, kernel stalled) get urgent priority (triggers texts)
+    # Warnings (high failure rate, cooldowns, usage budget) stay low priority
     CRITICAL_KEYWORDS = ('ollama unreachable', 'ollama failing', 'kernel may be stalled')
     if new_issues:
         report = "SELF-DIAGNOSIS:\n" + "\n".join(f"- {i}" for i in new_issues)
@@ -550,7 +588,9 @@ def main():
             if cycle % 5 == 0:
                 goals = database.get_active_goals()
                 daily = database.get_daily_token_usage('ollama')
-                log(f'Cycle {cycle}: {len(goals)} goals, ollama_calls_today={daily}')
+                pct = round(daily / OLLAMA_DAILY_LIMIT * 100) if OLLAMA_DAILY_LIMIT > 0 else 0
+                throttle_status = ' [THROTTLED]' if _throttled else ''
+                log(f'Cycle {cycle}: {len(goals)} goals, usage={daily}/{OLLAMA_DAILY_LIMIT} ({pct}%){throttle_status}')
             time.sleep(CYCLE_INTERVAL)
         except KeyboardInterrupt:
             log('Kernel stopped.')
