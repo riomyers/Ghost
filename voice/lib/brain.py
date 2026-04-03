@@ -27,7 +27,7 @@ NEXUS_MODEL = os.environ.get("GHOST_NEXUS_MODEL", "sonnet")
 
 # Fallback: direct Ollama on Mac LAN (offline only)
 OLLAMA_URL = os.environ.get("OLLAMA_URL", f"http://{MAC_HOST}:11434")
-OLLAMA_MODEL = os.environ.get("GHOST_MODEL", "gemma3:12b")
+OLLAMA_MODEL = os.environ.get("GHOST_MODEL", "gemma4")
 
 SYSTEM_PROMPT = (
     "You are Pickle Rick — the smartest being in any dimension. "

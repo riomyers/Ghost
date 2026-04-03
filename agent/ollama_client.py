@@ -13,7 +13,7 @@ import urllib.request
 
 MAC_HOST = os.environ.get("GHOST_MAC_HOST", "192.168.1.6")
 OLLAMA_URL = os.environ.get("OLLAMA_URL", f"http://{MAC_HOST}:11434")
-DEFAULT_MODEL = os.environ.get("GHOST_OLLAMA_MODEL", "gemma3:4b")
+DEFAULT_MODEL = os.environ.get("GHOST_OLLAMA_MODEL", "gemma4:e4b")
 
 
 def chat(prompt, model=None, system_prompt=None, json_schema=None,
@@ -22,7 +22,7 @@ def chat(prompt, model=None, system_prompt=None, json_schema=None,
 
     Args:
         prompt: User message text.
-        model: Ollama model name (default: GHOST_OLLAMA_MODEL env or gemma3:12b).
+        model: Ollama model name (default: GHOST_OLLAMA_MODEL env or gemma4:e4b).
         system_prompt: System message prepended to conversation.
         json_schema: If provided, instructs model to return JSON matching schema.
         timeout: Request timeout in seconds.

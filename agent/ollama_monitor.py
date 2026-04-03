@@ -2,7 +2,7 @@
 """Ollama health monitor — thread-safe singleton, checks every 60s.
 
 Monitors local Ollama at localhost:11434. Checks model availability
-(phi3:mini required). Logs state transitions only — no spam.
+(gemma4:e4b required). Logs state transitions only — no spam.
 """
 
 import json
@@ -15,7 +15,7 @@ logger = logging.getLogger("ghost.ollama_monitor")
 
 OLLAMA_URL = "http://localhost:11434"
 CHECK_INTERVAL = 60  # seconds
-REQUIRED_MODEL = "phi3:mini"
+REQUIRED_MODEL = "gemma4:e4b"
 
 
 class _OllamaMonitor:

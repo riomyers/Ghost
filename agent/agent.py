@@ -107,7 +107,7 @@ def record_heartbeat(db):
     return vitals
 
 
-def think(prompt: str, model: str = 'phi3:mini'):
+def think(prompt: str, model: str = 'gemma4:e4b'):
     """Ask the local brain a question."""
     try:
         import urllib.request
@@ -149,10 +149,11 @@ def main_loop():
                 db.commit()
                 
                 if job_type == 'think':
-                    response, duration = think(payload)
+                    used_model = 'gemma4:e4b'
+                    response, duration = think(payload, model=used_model)
                     ts = datetime.now(timezone.utc).isoformat()
                     db.execute('INSERT INTO thoughts (timestamp, trigger, prompt, response, model, duration_sec) VALUES (?, ?, ?, ?, ?, ?)',
-                               (ts, 'job', payload, response, 'phi3:mini', duration))
+                               (ts, 'job', payload, response, used_model, duration))
                     db.execute('UPDATE jobs SET status = "done", result = ?, completed = ? WHERE id = ?',
                                (response[:1000], ts, job_id))
                     db.commit()
