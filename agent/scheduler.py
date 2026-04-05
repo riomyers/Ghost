@@ -13,6 +13,11 @@ import ollama_client
 NTFY_TOPIC = 'https://ntfy.sh/ghost-pickle-rick'
 NTFY_PRIORITIES = {'min': '1', 'low': '2', 'default': '3', 'high': '4', 'urgent': '5'}
 
+# Load owner context for richer EOD summaries
+from pathlib import Path as _Path
+_ctx_path = _Path(__file__).parent.parent / 'config' / 'owner-context.md'
+OWNER_CONTEXT = _ctx_path.read_text().strip() if _ctx_path.exists() else ''
+
 
 NOTIFICATIONS_ENABLED = os.environ.get('GHOST_NOTIFICATIONS', '1') == '1'
 
@@ -138,13 +143,22 @@ Notable actions today:
 
     summary_data += "\nBe concise. Focus on what Ghost actually DID, not what it thought about."
 
+    eod_owner = ''
+    if OWNER_CONTEXT:
+        eod_owner = (
+            ' You know Rio well — senior engineer fighting stage 4 cancer '
+            'while building software from hospital beds. Tailor your summary '
+            'to what matters: Lumen health data, Nexus uptime, Spectre '
+            'stability, security across repos. Skip noise.'
+        )
+
     eod_system = (
         "You are Ghost, an autonomous Linux agent that monitors systems, "
         "thinks about goals, and takes actions. You're summarizing YOUR OWN "
         "activity for your owner Rio. Write in first person. Be brief. "
         "IMPORTANT: Plain text only — no markdown, no bold, no headers, no "
         "bullet symbols. Write like a human texting a quick update. Casual, "
-        "warm, short sentences."
+        f"warm, short sentences.{eod_owner}"
     )
 
     try:

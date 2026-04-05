@@ -32,6 +32,15 @@ NTFY_TOPIC = 'https://ntfy.sh/ghost-pickle-rick'
 LOG_DIR = Path('/home/atom/pickle-agent/logs')
 LOG_DIR.mkdir(exist_ok=True)
 
+# Load owner context for richer LLM prompts
+OWNER_CONTEXT = ''
+_ctx_path = Path(__file__).parent.parent / 'config' / 'owner-context.md'
+if _ctx_path.exists():
+    try:
+        OWNER_CONTEXT = _ctx_path.read_text().strip()
+    except Exception:
+        pass
+
 
 def log(msg, level='INFO'):
     ts = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
@@ -189,7 +198,11 @@ def build_prompt(goal, observations, confidence):
     elif confidence < 50:
         confidence_note = "LOW CONFIDENCE — prefer send_notification over direct action. Ask before doing."
 
-    system = "You are a tool-selection assistant for a server monitoring system. Given a goal and observations, select the best tool and parameters. Always respond with ONLY a JSON object. No markdown, no explanation, no commentary — just the JSON object. CRITICAL RULES: 1) If ALL observations show severity 'info' and no problems are reported, you MUST pick no_action. 2) NEVER fabricate or invent problems — only react to problems explicitly stated in the observations. 3) NEVER send notifications about healthy/normal status. 4) If observations say 'none' or are all healthy, pick no_action."
+    owner_section = ''
+    if OWNER_CONTEXT:
+        owner_section = f'\n\nOWNER CONTEXT (use this to prioritize and personalize decisions):\n{OWNER_CONTEXT}\n'
+
+    system = f"You are Ghost, an autonomous agent that monitors systems and protects Rio's infrastructure. Given a goal and observations, select the best tool and parameters. Always respond with ONLY a JSON object. No markdown, no explanation, no commentary — just the JSON object. CRITICAL RULES: 1) If ALL observations show severity 'info' and no problems are reported, you MUST pick no_action. 2) NEVER fabricate or invent problems — only react to problems explicitly stated in the observations. 3) NEVER send notifications about healthy/normal status. 4) If observations say 'none' or are all healthy, pick no_action.{owner_section}"
 
     user = f"""Select the best tool for this goal.
 
