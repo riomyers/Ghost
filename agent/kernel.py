@@ -376,6 +376,9 @@ def execute_tasks():
                 database.update_task(task['id'], 'failed', result)
                 notify('Ghost: Blocked', f'Refused: {cmd[:200]}', priority='high')
             else:
+                # Elevate systemctl/journalctl to sudo (atom has NOPASSWD)
+                if cmd.strip().startswith(('systemctl ', 'journalctl ')):
+                    cmd = f'sudo {cmd}'
                 r = subprocess.run(['bash', '-c', cmd],
                     capture_output=True, text=True, timeout=30)
                 output = (r.stdout + r.stderr).strip()[:2000]
