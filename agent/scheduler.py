@@ -15,8 +15,13 @@ NTFY_PRIORITIES = {'min': '1', 'low': '2', 'default': '3', 'high': '4', 'urgent'
 
 # Load owner context for richer EOD summaries
 from pathlib import Path as _Path
+OWNER_CONTEXT = ''
 _ctx_path = _Path(__file__).parent.parent / 'config' / 'owner-context.md'
-OWNER_CONTEXT = _ctx_path.read_text().strip() if _ctx_path.exists() else ''
+if _ctx_path.exists():
+    try:
+        OWNER_CONTEXT = _ctx_path.read_text().strip()
+    except Exception:
+        pass
 
 
 NOTIFICATIONS_ENABLED = os.environ.get('GHOST_NOTIFICATIONS', '1') == '1'
