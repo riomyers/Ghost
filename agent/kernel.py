@@ -429,8 +429,8 @@ def execute_tasks():
             new_interval = max(5, min(60, int(new_interval)))
             # Don't let adjust_cycle override budget throttle
             if _throttled and new_interval < THINK_INTERVAL_THROTTLED:
-                result = (f'BLOCKED: Cannot set interval to {new_interval} — '
-                          f'budget throttle active ({THINK_INTERVAL_THROTTLED} min). '
+                result = (f'BLOCKED: Cannot set interval to {new_interval} cycles — '
+                          f'budget throttle active (min {THINK_INTERVAL_THROTTLED} cycles). '
                           f'Throttle lifts automatically when daily usage resets.')
                 log(f'ADJUST_CYCLE: {result}', 'WARN')
                 database.update_task(task['id'], 'completed', result)
@@ -483,7 +483,7 @@ def self_diagnose():
         if _throttled:
             issues.append(f"No think cycles in last {stall_window} min (throttled — budget enforcement active)")
         else:
-            issues.append("No think cycles in last 15 min — kernel may be stalled")
+            issues.append(f"No think cycles in last {stall_window} min — kernel may be stalled")
 
     # Check sensor health
     stale_sensors = [name for name, ts in SENSOR_COOLDOWN.items() if time.time() - ts < 600]
