@@ -427,11 +427,20 @@ def execute_tasks():
             new_interval = params.get('interval', THINK_INTERVAL_DEFAULT)
             reason = params.get('reason', 'no reason given')
             new_interval = max(5, min(60, int(new_interval)))
-            THINK_INTERVAL = new_interval
-            result = f'Think interval set to {new_interval} cycles ({reason})'
-            log(f'ADJUST_CYCLE: {result}')
-            database.update_task(task['id'], 'completed', result)
-            success = True
+            # Don't let adjust_cycle override budget throttle
+            if _throttled and new_interval < THINK_INTERVAL_THROTTLED:
+                result = (f'BLOCKED: Cannot set interval to {new_interval} — '
+                          f'budget throttle active ({THINK_INTERVAL_THROTTLED} min). '
+                          f'Throttle lifts automatically when daily usage resets.')
+                log(f'ADJUST_CYCLE: {result}', 'WARN')
+                database.update_task(task['id'], 'completed', result)
+                success = True
+            else:
+                THINK_INTERVAL = new_interval
+                result = f'Think interval set to {new_interval} cycles ({reason})'
+                log(f'ADJUST_CYCLE: {result}')
+                database.update_task(task['id'], 'completed', result)
+                success = True
 
         elif tool == 'no_action':
             database.update_task(task['id'], 'skipped', 'No action needed')
@@ -460,17 +469,21 @@ def self_diagnose():
     if not ollama_client.is_available():
         issues.append("Ollama unreachable — background thinking disabled")
 
-    # Check for think cycle stalls
+    # Check for think cycle stalls — use wider window when throttled
+    stall_window = 35 if _throttled else 15
     db = database.get_db()
-    recent_thinks = db.execute('''SELECT details FROM action_log
-        WHERE phase = 'think' AND created_at > datetime('now', '-15 minutes')
+    recent_thinks = db.execute(f'''SELECT details FROM action_log
+        WHERE phase = 'think' AND created_at > datetime('now', '-{stall_window} minutes')
         ORDER BY id DESC LIMIT 3''').fetchall()
     db.close()
     ollama_errors = sum(1 for t in recent_thinks if 'ollama error' in (t['details'] or '').lower())
     if ollama_errors >= 2:
         issues.append(f"Ollama failing: {ollama_errors}/3 recent thinks had errors")
     elif not recent_thinks:
-        issues.append("No think cycles in last 15 min — kernel may be stalled")
+        if _throttled:
+            issues.append(f"No think cycles in last {stall_window} min (throttled — budget enforcement active)")
+        else:
+            issues.append("No think cycles in last 15 min — kernel may be stalled")
 
     # Check sensor health
     stale_sensors = [name for name, ts in SENSOR_COOLDOWN.items() if time.time() - ts < 600]
